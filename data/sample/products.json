@@ -1,0 +1,8 @@
+[
+  {"sku":"traillite-ul2","name":"TrailLite UL2 Tent","make":"TrailLite","cat":"tents",
+   "usd":189.0,"link":"https://ex/traillite-ul2","weight_kg":"1.1","capacity":"2",
+   "history":[["2026-04-01",249.0],["2026-05-01",245.0],["2026-06-01",189.0]]},
+  {"sku":"cloudpeak-2p","name":"CloudPeak 2P","make":"CloudPeak","cat":"tents",
+   "usd":215.0,"link":"https://ex/cloudpeak-2p","weight_kg":"1.4","capacity":"2",
+   "history":[["2026-05-01",229.0],["2026-06-01",215.0]]}
+]
