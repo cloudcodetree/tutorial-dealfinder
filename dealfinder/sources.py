@@ -6,6 +6,7 @@ import json
 from typing import Iterator, Protocol, runtime_checkable
 
 import httpx
+from selectolax.parser import HTMLParser
 
 from dealfinder.schema import PricePoint, Product
 
@@ -65,3 +66,28 @@ class ApiSource:
                 url=it["url"],
                 source=self.name,
             )
+
+
+class ScraperSource:
+    """Parse saved listing HTML. In production you'd fetch live pages — respecting
+    robots.txt, rate limits, and ToS; here we parse fixtures so tests stay offline."""
+
+    name = "scrape"
+
+    def __init__(self, html_paths: list[str], source_url: str):
+        self.html_paths = html_paths
+        self.source_url = source_url
+
+    def products(self) -> Iterator[Product]:
+        for path in self.html_paths:
+            tree = HTMLParser(open(path).read())
+            for node in tree.css("div.product"):
+                yield Product(
+                    id=node.attributes["data-id"],
+                    title=node.css_first("h2.title").text(strip=True),
+                    brand=node.css_first("span.brand").text(strip=True),
+                    category="unknown",
+                    price=float(node.attributes["data-price"]),
+                    url=self.source_url,
+                    source=self.name,
+                )
