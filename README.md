@@ -6,6 +6,7 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 3 — ["Is it a good deal?" price model](https://cloudcodetree.com/tutorials/dealfinder-deal-model/)**: learn a fair price from features with a from-scratch linear model, evaluate it, and flag underpriced listings.
 - **Part 4 — [Recommender](https://cloudcodetree.com/tutorials/dealfinder-recommender/)**: content-based + collaborative filtering, scored offline with precision@k and NDCG.
 - **Part 5 — [Semantic search](https://cloudcodetree.com/tutorials/dealfinder-search/)**: real neural embeddings (fastembed) + BM25, fused with RRF, then reranked by value.
+- **Part 6 — [Structured extraction](https://cloudcodetree.com/tutorials/dealfinder-extraction/)**: messy listing → schema-validated JSON (Pydantic), deterministic offline + an LLM path.
 
 ## Run it
 
@@ -50,5 +51,7 @@ git checkout step-02   # then step-03, step-04, …
 | `step-17` | Search primitives — cosine, BM25, RRF, value rerank (`search.py`) |
 | `step-18` | Neural embeddings on CPU via fastembed (`embed.py`) |
 | `step-19` | Four-stage search demo (`run_search.py`) |
+| `step-20` | Structured extraction — schema + rule/LLM paths (`extract.py`) |
+| `step-21` | Extraction demo over messy listings (`run_extract.py`) |
 
 `main` is the finished version.
