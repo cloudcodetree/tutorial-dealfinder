@@ -15,6 +15,8 @@ Add a source = add a class. Nothing downstream changes.
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import urlparse
 
 import httpx
 
@@ -119,4 +121,45 @@ class ApifySource:
         return out
 
 
-LIVE_SOURCES = [ItunesSource(), RapidApiSource(), ApifySource()]
+class FirecrawlSource:
+    """Broad-web source via Firecrawl search: catches long-tail retailers the
+    structured shopping APIs miss. Noisier (page-level, not product-level), so we
+    keep only results that carry a real price. Needs FIRECRAWL_API_KEY."""
+
+    name = "Firecrawl"
+    # editorial / review domains that quote prices but aren't a place to buy
+    _SKIP = {"rtings.com", "nytimes.com", "techradar.com", "cnet.com", "tomsguide.com",
+             "wired.com", "theverge.com", "pcmag.com", "forbes.com", "reddit.com",
+             "youtube.com", "wikipedia.org", "wirecutter.com", "businessinsider.com"}
+
+    def available(self) -> bool:
+        return bool(os.getenv("FIRECRAWL_API_KEY"))
+
+    def search(self, query: str, limit: int = 10) -> list[Product]:
+        key = os.getenv("FIRECRAWL_API_KEY")
+        if not key:
+            return []
+        r = httpx.post(
+            "https://api.firecrawl.dev/v1/search",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"query": f"{query} buy price", "limit": limit},
+            timeout=60,
+        )
+        out = []
+        for it in (r.json().get("data") or []):
+            m = re.search(r"\$\s?([0-9][0-9,]*(?:\.[0-9]{2})?)", it.get("description") or "")
+            price = _f(m.group(1)) if m else None
+            if not price or not (1 <= price <= 100000):
+                continue
+            dom = urlparse(it.get("url") or "").netloc.replace("www.", "") or "web"
+            if dom in self._SKIP:
+                continue
+            out.append(Product(
+                id=f"firecrawl-{(it.get('url') or it.get('title') or '')[:60]}",
+                title=(it.get("title") or query)[:120], brand=dom, category="product",
+                price=price, url=it.get("url") or "", source=f"{self.name}:{dom}", image_url=None,
+            ))
+        return out
+
+
+LIVE_SOURCES = [ItunesSource(), RapidApiSource(), ApifySource(), FirecrawlSource()]

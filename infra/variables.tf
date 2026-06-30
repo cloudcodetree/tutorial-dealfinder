@@ -46,3 +46,9 @@ variable "rapidapi_key" {
   sensitive = true
   default   = ""
 }
+
+variable "firecrawl_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}

@@ -91,6 +91,7 @@ resource "docker_container" "app" {
     "APIFY_TOKEN=${var.apify_token}",
     "APIFY_ACTOR=${var.apify_actor}",
     "RAPIDAPI_KEY=${var.rapidapi_key}",
+    "FIRECRAWL_API_KEY=${var.firecrawl_api_key}",
   ]
 
   ports {
