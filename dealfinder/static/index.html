@@ -50,6 +50,9 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => "$" + Number(n).toFixed(2);
+// External listing data is untrusted — escape all text and allow only http(s) URLs.
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const safeUrl = (u) => { try { const x = new URL(u, location.origin); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : ""; } catch { return ""; } };
 
 async function run(q) {
   $("go").disabled = true; $("meta").textContent = "searching live sources…"; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -61,18 +64,22 @@ async function run(q) {
     if (!d.results.length) {
       $("grid").innerHTML = `<div class="empty">No live results. Add a free key to light up real retail sources (see below).</div>`;
     } else {
-      $("grid").innerHTML = d.results.map(p => `
-        <a class="card" href="${p.url || '#'}" target="_blank" rel="noopener noreferrer">
-          ${p.image_url ? `<img class="thumb" src="${p.image_url}" alt="">` : `<div class="thumb"></div>`}
+      $("grid").innerHTML = d.results.map(p => {
+        const href = safeUrl(p.url);
+        const img = safeUrl(p.image_url);
+        const dealPct = Number(p.deal_pct) || 0;
+        return `
+        <a class="card" href="${href || '#'}" target="_blank" rel="noopener noreferrer">
+          ${img ? `<img class="thumb" src="${esc(img)}" alt="">` : `<div class="thumb"></div>`}
           <div>
-            <div class="title">${p.title}</div>
+            <div class="title">${esc(p.title)}</div>
             <div class="row">
-              <span class="price">${fmt(p.price)}</span>
-              ${p.deal_pct > 0 ? `<span class="deal">▼ ${p.deal_pct}% under median</span>` : ``}
+              <span class="price">${esc(fmt(p.price))}</span>
+              ${dealPct > 0 ? `<span class="deal">▼ ${esc(dealPct)}% under median</span>` : ``}
             </div>
-            <div class="row"><span class="src">${p.source}</span></div>
+            <div class="row"><span class="src">${esc(p.source)}</span></div>
           </div>
-        </a>`).join("");
+        </a>`; }).join("");
     }
   } catch (e) {
     $("meta").textContent = "search failed: " + e;
@@ -83,7 +90,7 @@ async function run(q) {
 fetch("/sources").then(r=>r.json()).then(s => {
   const off = Object.entries(s).filter(([,v])=>!v).map(([k])=>k);
   if (off.length) $("note").innerHTML =
-    `Live now via keyless sources. To add real retail deals, set <code>RAPIDAPI_KEY</code> or <code>APIFY_TOKEN</code> and restart — currently off: ${off.join(", ")}.`;
+    `Live now via keyless sources. To add real retail deals, set <code>RAPIDAPI_KEY</code> or <code>APIFY_TOKEN</code> and restart — currently off: ${esc(off.join(", "))}.`;
 });
 
 $("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) run(q); });
