@@ -9,6 +9,7 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 6 — [Structured extraction](https://cloudcodetree.com/tutorials/dealfinder-extraction/)**: messy listing → schema-validated JSON (Pydantic), deterministic offline + an LLM path.
 - **Part 8 — [The agent](https://cloudcodetree.com/tutorials/dealfinder-agent/)**: a ReAct loop over tools (text-to-SQL + deal ranking), with a human-in-the-loop gate.
 - **Part 9 — [MCP server](https://cloudcodetree.com/tutorials/dealfinder-mcp/)**: expose the tools over the Model Context Protocol — callable from Claude Code.
+- **Part 10 — [Safety & governance](https://cloudcodetree.com/tutorials/dealfinder-safety/)**: prompt-injection detection, PII redaction, output validation, audit log.
 
 ## Run it
 
@@ -58,5 +59,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-22` | ReAct agent loop + tools (text-to-SQL) (`agent.py`, `tools.py`) |
 | `step-23` | Tool-chaining agent demo (`run_agent.py`) |
 | `step-24` | MCP server — tools, a resource, a prompt (`mcp_server.py`) |
+| `step-25` | Guardrails — injection, PII, validation, audit (`safety.py`) |
 
 `main` is the finished version.
