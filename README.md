@@ -71,5 +71,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-29` | Cost attribution + budget + drift (PSI) (`ops.py`) |
 | `step-30` | **Live aggregator + web app** — real sources (iTunes/RapidAPI/Apify) (`live_sources.py`, `aggregate.py`, web UI) |
 | `step-31` | **Terraform pgvector + persistence + semantic search** (`infra/`, `pgstore.py`, `/semantic`) |
+| `step-32` | **Whole stack in Terraform (db+app) + semantic toggle in the web UI** |
 
 `main` is the finished version.

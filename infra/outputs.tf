@@ -7,3 +7,8 @@ output "database_url" {
 output "container" {
   value = docker_container.db.name
 }
+
+output "app_url" {
+  description = "DealFinder web app once the stack is up."
+  value       = "http://localhost:${var.app_port}"
+}

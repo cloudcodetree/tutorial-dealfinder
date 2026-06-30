@@ -66,3 +66,40 @@ resource "docker_container" "db" {
     retries  = 12
   }
 }
+
+# --- the DealFinder app (built from the repo Dockerfile) ---
+
+resource "docker_image" "app" {
+  name = "dealfinder-app:local"
+  build {
+    context = abspath("${path.module}/..")
+  }
+  triggers = {
+    dockerfile = filesha1("${path.module}/../Dockerfile")
+  }
+}
+
+resource "docker_container" "app" {
+  name       = "dealfinder-app"
+  image      = docker_image.app.image_id
+  restart    = "unless-stopped"
+  depends_on = [docker_container.db]
+
+  # App talks to the DB over the shared network by container name.
+  env = [
+    "DATABASE_URL=postgresql://${var.db_user}:${var.db_password}@${docker_container.db.name}:5432/${var.db_name}",
+    "APIFY_TOKEN=${var.apify_token}",
+    "APIFY_ACTOR=${var.apify_actor}",
+    "RAPIDAPI_KEY=${var.rapidapi_key}",
+  ]
+
+  ports {
+    internal = 8000
+    external = var.app_port
+    ip       = "127.0.0.1"
+  }
+
+  networks_advanced {
+    name = docker_network.net.name
+  }
+}
