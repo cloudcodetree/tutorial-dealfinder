@@ -6,11 +6,13 @@ discussed in the tutorial; this is the shape they hang off.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
+from . import pgstore
 from .aggregate import aggregate
 from .deal import deal_score
 from .dealmodel import LinearModel
@@ -19,6 +21,20 @@ from .live_sources import LIVE_SOURCES
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
+
+# Persistence is optional: if DATABASE_URL points at a reachable pgvector, we
+# persist + enable semantic search; otherwise the app still does live search.
+_DB = bool(os.getenv("DATABASE_URL"))
+if _DB:
+    try:
+        pgstore.migrate()
+    except Exception:
+        _DB = False
+
+
+def _embed_texts(texts):
+    from .embed import embed_texts
+    return embed_texts(texts)
 
 _catalog = load_catalog()
 _idx = {p.id: i for i, p in enumerate(_catalog)}
@@ -34,8 +50,27 @@ def healthz():
 
 @app.get("/search")
 def search(q: str):
-    """Aggregate live deals for a query across every configured source."""
-    return aggregate(q)
+    """Aggregate live deals across sources; persist + embed them when a DB is set."""
+    result = aggregate(q)
+    if _DB and result["results"]:
+        try:
+            texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
+            pgstore.upsert(result["results"], _embed_texts(texts), query=q)
+            result["persisted"] = pgstore.count()
+        except Exception:
+            pass
+    return result
+
+
+@app.get("/semantic")
+def semantic(q: str, k: int = 12):
+    """Search everything ever aggregated, by meaning (pgvector)."""
+    if not _DB:
+        raise HTTPException(status_code=503, detail="no database configured")
+    rows = pgstore.semantic_search(_embed_texts([q])[0], k=k)
+    for r in rows:
+        r["similarity"] = round(float(r["similarity"]), 3)
+    return {"query": q, "count": len(rows), "results": rows}
 
 
 @app.get("/sources")
