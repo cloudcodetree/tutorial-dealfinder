@@ -29,7 +29,8 @@ resource "docker_volume" "db" {
 }
 
 resource "docker_image" "pgvector" {
-  name = "pgvector/pgvector:pg16"
+  # Pinned by digest (supply-chain): pgvector/pgvector:pg16 at the time of writing.
+  name = "pgvector/pgvector@sha256:131dcf7ff6a900545df8e7e092c270aa8c6db2f2c818e408cb45ec21316b74e6"
 }
 
 resource "docker_container" "db" {
@@ -46,6 +47,7 @@ resource "docker_container" "db" {
   ports {
     internal = 5432
     external = var.db_port
+    ip       = "127.0.0.1" # loopback only — never expose the DB on the network
   }
 
   networks_advanced {

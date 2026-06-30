@@ -4,8 +4,11 @@ variable "db_user" {
 }
 
 variable "db_password" {
-  type    = string
-  default = "dealfinder" # local dev only; override for anything shared
+  type      = string
+  sensitive = true
+  # Local-dev default; the DB is bound to loopback only (see main.tf). For
+  # anything shared, override via TF_VAR_db_password and use a managed DB.
+  default = "dealfinder"
 }
 
 variable "db_name" {
