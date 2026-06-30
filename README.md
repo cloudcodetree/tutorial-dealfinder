@@ -5,6 +5,7 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 1 — [Build the Data Layer](https://cloudcodetree.com/tutorials/dealfinder-data-layer/)**: ingest messy product/price data from a **dataset**, a **live API**, and a **scraper** behind one `DealSource` interface; normalize, dedup, and store it.
 - **Part 3 — ["Is it a good deal?" price model](https://cloudcodetree.com/tutorials/dealfinder-deal-model/)**: learn a fair price from features with a from-scratch linear model, evaluate it, and flag underpriced listings.
 - **Part 4 — [Recommender](https://cloudcodetree.com/tutorials/dealfinder-recommender/)**: content-based + collaborative filtering, scored offline with precision@k and NDCG.
+- **Part 5 — [Semantic search](https://cloudcodetree.com/tutorials/dealfinder-search/)**: real neural embeddings (fastembed) + BM25, fused with RRF, then reranked by value.
 
 ## Run it
 
@@ -46,5 +47,8 @@ git checkout step-02   # then step-03, step-04, …
 | `step-14` | Ranking metrics — precision@k, recall@k, NDCG (`ranking.py`) |
 | `step-15` | Synthetic likes with latent personas (`make_interactions.py`) |
 | `step-16` | Recommend + offline eval vs popularity (`run_recs.py`) |
+| `step-17` | Search primitives — cosine, BM25, RRF, value rerank (`search.py`) |
+| `step-18` | Neural embeddings on CPU via fastembed (`embed.py`) |
+| `step-19` | Four-stage search demo (`run_search.py`) |
 
 `main` is the finished version.
