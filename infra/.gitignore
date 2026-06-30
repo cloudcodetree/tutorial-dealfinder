@@ -1,0 +1,7 @@
+# Terraform / OpenTofu — never commit state (it can hold secrets) or local cache
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
