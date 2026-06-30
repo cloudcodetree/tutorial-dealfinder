@@ -1,0 +1,9 @@
+# Example PaaS deploy (Render). The same Docker image runs anywhere a container
+# does — swap this for fly.toml, a Cloud Run service, an ECS task, etc.
+services:
+  - type: web
+    name: dealfinder
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true

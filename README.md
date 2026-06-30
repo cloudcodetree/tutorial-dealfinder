@@ -12,6 +12,7 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 10 — [Safety & governance](https://cloudcodetree.com/tutorials/dealfinder-safety/)**: prompt-injection detection, PII redaction, output validation, audit log.
 - **Part 11 — [Evaluation harness](https://cloudcodetree.com/tutorials/dealfinder-eval/)**: a golden set, exact-match/field metrics, A/B comparison, and a CI gate.
 - **Part 12 — [Serve efficiently](https://cloudcodetree.com/tutorials/dealfinder-serve/)**: a FastAPI service + a semantic cache; streaming/batching/vLLM notes.
+- **Part 13 — [Containerize & deploy](https://cloudcodetree.com/tutorials/dealfinder-deploy/)**: a Dockerfile, GitHub Actions CD with an eval gate, and a PaaS config.
 
 ## Run it
 
@@ -64,5 +65,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-25` | Guardrails — injection, PII, validation, audit (`safety.py`) |
 | `step-26` | Evaluation harness — golden set, metrics, A/B, CI gate (`evals.py`) |
 | `step-27` | FastAPI service + semantic cache (`serve.py`, `cache.py`) |
+| `step-28` | Dockerfile + CI/CD + deploy config (`Dockerfile`, `ci.yml`) |
 
 `main` is the finished version.
