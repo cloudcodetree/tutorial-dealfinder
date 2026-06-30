@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DealFinder</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#283041; --accent:#0ea5e9; --green:#3fb950; --mut:#8b98a8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:#e6edf3; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { padding:28px 20px 8px; text-align:center; }
+  h1 { margin:0; font-size:26px; letter-spacing:-.02em; }
+  h1 span { color:var(--accent); }
+  .sub { color:var(--mut); font-size:13px; margin-top:4px; }
+  .wrap { max-width:880px; margin:0 auto; padding:16px 20px 60px; }
+  form { display:flex; gap:8px; margin:18px 0 6px; }
+  input { flex:1; padding:13px 15px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:#fff; font-size:15px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { padding:13px 20px; border:0; border-radius:10px; background:var(--accent); color:#04222e; font-weight:700; cursor:pointer; font-size:15px; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .meta { color:var(--mut); font-size:12px; font-family:ui-monospace,Menlo,monospace; min-height:18px; margin-bottom:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px; display:flex; gap:12px; text-decoration:none; color:inherit; transition:border-color .15s; }
+  .card:hover { border-color:var(--accent); }
+  .thumb { width:54px; height:54px; border-radius:8px; object-fit:cover; background:#0b0f14; flex:0 0 auto; }
+  .title { font-weight:600; font-size:13.5px; line-height:1.35; }
+  .row { display:flex; align-items:baseline; gap:8px; margin-top:6px; flex-wrap:wrap; }
+  .price { font-weight:800; font-size:16px; }
+  .src { font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--mut); border:1px solid var(--line); border-radius:5px; padding:1px 6px; }
+  .deal { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--green); font-weight:700; }
+  .empty { color:var(--mut); text-align:center; padding:40px 0; }
+  .note { font-size:12px; color:var(--mut); text-align:center; margin-top:22px; line-height:1.6; }
+  code { background:#0b0f14; padding:1px 5px; border-radius:4px; color:#cdd7e2; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Deal<span>Finder</span></h1>
+    <div class="sub">search an item · aggregate live offers · ranked by value</div>
+  </header>
+  <div class="wrap">
+    <form id="f">
+      <input id="q" placeholder="Try: wireless headphones, 4k monitor, the dark tower…" autocomplete="off" />
+      <button id="go" type="submit">Find deals</button>
+    </form>
+    <div class="meta" id="meta"></div>
+    <div class="grid" id="grid"></div>
+    <div class="note" id="note"></div>
+  </div>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => "$" + Number(n).toFixed(2);
+
+async function run(q) {
+  $("go").disabled = true; $("meta").textContent = "searching live sources…"; $("grid").innerHTML = ""; $("note").textContent = "";
+  try {
+    const r = await fetch("/search?q=" + encodeURIComponent(q));
+    const d = await r.json();
+    const live = (d.sources_live || []).join(", ") || "none";
+    $("meta").textContent = `${d.count} offers · sources live: ${live} · median ${fmt(d.median_price)}`;
+    if (!d.results.length) {
+      $("grid").innerHTML = `<div class="empty">No live results. Add a free key to light up real retail sources (see below).</div>`;
+    } else {
+      $("grid").innerHTML = d.results.map(p => `
+        <a class="card" href="${p.url || '#'}" target="_blank" rel="noopener noreferrer">
+          ${p.image_url ? `<img class="thumb" src="${p.image_url}" alt="">` : `<div class="thumb"></div>`}
+          <div>
+            <div class="title">${p.title}</div>
+            <div class="row">
+              <span class="price">${fmt(p.price)}</span>
+              ${p.deal_pct > 0 ? `<span class="deal">▼ ${p.deal_pct}% under median</span>` : ``}
+            </div>
+            <div class="row"><span class="src">${p.source}</span></div>
+          </div>
+        </a>`).join("");
+    }
+  } catch (e) {
+    $("meta").textContent = "search failed: " + e;
+  }
+  $("go").disabled = false;
+}
+
+fetch("/sources").then(r=>r.json()).then(s => {
+  const off = Object.entries(s).filter(([,v])=>!v).map(([k])=>k);
+  if (off.length) $("note").innerHTML =
+    `Live now via keyless sources. To add real retail deals, set <code>RAPIDAPI_KEY</code> or <code>APIFY_TOKEN</code> and restart — currently off: ${off.join(", ")}.`;
+});
+
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) run(q); });
+</script>
+</body>
+</html>

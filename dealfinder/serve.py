@@ -6,11 +6,16 @@ discussed in the tutorial; this is the shape they hang off.
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from pathlib import Path
 
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+
+from .aggregate import aggregate
 from .deal import deal_score
 from .dealmodel import LinearModel
 from .features import feature_matrix
+from .live_sources import LIVE_SOURCES
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
@@ -25,6 +30,23 @@ _fair = {p.id: float(fp) for p, fp in zip(_catalog, _model.predict(_X))}
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "products": len(_catalog)}
+
+
+@app.get("/search")
+def search(q: str):
+    """Aggregate live deals for a query across every configured source."""
+    return aggregate(q)
+
+
+@app.get("/sources")
+def sources():
+    """Which live sources are configured right now."""
+    return {s.name: s.available() for s in LIVE_SOURCES}
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return (Path(__file__).parent / "static" / "index.html").read_text()
 
 
 @app.get("/deal/{product_id}")

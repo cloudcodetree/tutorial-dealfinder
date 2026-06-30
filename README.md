@@ -27,6 +27,7 @@ pytest -q                          # 17 passed
 python -m dealfinder.run_ingest    # ingested 2 products -> dealfinder.sqlite
 python data/make_catalog.py        # wrote 28 tents -> data/sample/catalog.json
 python -m dealfinder.train_model   # MAE, R^2, and the deals it finds
+uvicorn dealfinder.serve:app --port 8000   # the live aggregator web app → http://localhost:8000
 ```
 
 Work through it **version by version** — each step is a git tag:
@@ -68,5 +69,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-27` | FastAPI service + semantic cache (`serve.py`, `cache.py`) |
 | `step-28` | Dockerfile + CI/CD + deploy config (`Dockerfile`, `ci.yml`) |
 | `step-29` | Cost attribution + budget + drift (PSI) (`ops.py`) |
+| `step-30` | **Live aggregator + web app** — real sources (iTunes/RapidAPI/Apify) (`live_sources.py`, `aggregate.py`, web UI) |
 
 `main` is the finished version.
