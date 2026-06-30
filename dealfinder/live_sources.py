@@ -71,16 +71,16 @@ class RapidApiSource:
                       headers={"X-RapidAPI-Key": key, "X-RapidAPI-Host": self._host}, timeout=20)
         out = []
         for it in (r.json().get("data") or {}).get("products", []):
-            offer = it.get("offer") or {}
-            price = _f(offer.get("price"))
+            price = _f(it.get("price"))
             if not price:
                 continue
+            store = it.get("store_name") or "store"
             out.append(Product(
-                id=f"rapidapi-{it.get('product_id', it.get('product_title', ''))[:40]}",
+                id=f"rapidapi-{str(it.get('product_id') or it.get('product_title', ''))[:40]}",
                 title=(it.get("product_title") or query)[:120],
-                brand=None, category="product", price=price,
-                url=offer.get("offer_page_url") or it.get("product_page_url") or "",
-                source=f"{self.name}:{offer.get('store_name', 'store')}",
+                brand=store, category="product", price=price,
+                url=it.get("product_page_url") or "",
+                source=f"{self.name}:{store}",
                 image_url=(it.get("product_photos") or [None])[0],
             ))
         return out
