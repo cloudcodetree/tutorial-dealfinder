@@ -7,6 +7,7 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 4 — [Recommender](https://cloudcodetree.com/tutorials/dealfinder-recommender/)**: content-based + collaborative filtering, scored offline with precision@k and NDCG.
 - **Part 5 — [Semantic search](https://cloudcodetree.com/tutorials/dealfinder-search/)**: real neural embeddings (fastembed) + BM25, fused with RRF, then reranked by value.
 - **Part 6 — [Structured extraction](https://cloudcodetree.com/tutorials/dealfinder-extraction/)**: messy listing → schema-validated JSON (Pydantic), deterministic offline + an LLM path.
+- **Part 8 — [The agent](https://cloudcodetree.com/tutorials/dealfinder-agent/)**: a ReAct loop over tools (text-to-SQL + deal ranking), with a human-in-the-loop gate.
 
 ## Run it
 
@@ -53,5 +54,7 @@ git checkout step-02   # then step-03, step-04, …
 | `step-19` | Four-stage search demo (`run_search.py`) |
 | `step-20` | Structured extraction — schema + rule/LLM paths (`extract.py`) |
 | `step-21` | Extraction demo over messy listings (`run_extract.py`) |
+| `step-22` | ReAct agent loop + tools (text-to-SQL) (`agent.py`, `tools.py`) |
+| `step-23` | Tool-chaining agent demo (`run_agent.py`) |
 
 `main` is the finished version.
