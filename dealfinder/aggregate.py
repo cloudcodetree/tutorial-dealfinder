@@ -13,10 +13,14 @@ from .live_sources import LIVE_SOURCES
 
 
 def aggregate(query: str, sources=LIVE_SOURCES, limit: int = 24) -> dict:
+    # Use real retail sources when any are configured; fall back to keyless
+    # sources (e.g. iTunes media) only when nothing else is available.
+    available = [s for s in sources if s.available()]
+    real = [s for s in available if not getattr(s, "fallback_only", False)]
+    chosen = real or available
+
     products, live = [], []
-    for s in sources:
-        if not s.available():
-            continue
+    for s in chosen:
         try:
             found = s.search(query)
             if found:

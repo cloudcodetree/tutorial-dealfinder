@@ -30,6 +30,8 @@ def _f(v) -> float | None:
 
 class ItunesSource:
     name = "iTunes"
+    # Media catalog — only a keyless fallback when no real retail source is set.
+    fallback_only = True
 
     def available(self) -> bool:
         return True
@@ -94,21 +96,25 @@ class ApifySource:
         token = os.getenv("APIFY_TOKEN")
         if not token:
             return []
-        actor = os.getenv("APIFY_ACTOR", "emastra~google-shopping-scraper")
+        actor = os.getenv("APIFY_ACTOR", "automation-lab~google-shopping-scraper")
         r = httpx.post(
             f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items",
-            params={"token": token}, json={"queries": [query], "maxItems": limit}, timeout=120,
+            params={"token": token}, json={"queries": [query], "maxResults": limit}, timeout=180,
         )
+        body = r.json()
         out = []
-        for it in r.json() if isinstance(r.json(), list) else []:
-            price = _f(it.get("price"))
+        for it in body if isinstance(body, list) else []:
+            price = it.get("priceNumeric") or _f(it.get("price"))
             if not price:
                 continue
+            merchant = it.get("merchant") or "shopping"
             out.append(Product(
                 id=f"apify-{(it.get('title') or '')[:40]}",
-                title=(it.get("title") or query)[:120], brand=it.get("merchant"),
-                category="product", price=price, url=it.get("url") or "",
-                source=f"{self.name}:{it.get('source', 'shopping')}", image_url=it.get("imageUrl"),
+                title=(it.get("title") or query)[:120], brand=merchant,
+                category="product", price=float(price),
+                currency=it.get("currency") or "USD",
+                url=it.get("productUrl") or "",
+                source=f"{self.name}:{merchant}", image_url=it.get("imageUrl"),
             ))
         return out
 
