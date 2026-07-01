@@ -73,5 +73,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-31` | **Terraform pgvector + persistence + semantic search** (`infra/`, `pgstore.py`, `/semantic`) |
 | `step-32` | **Whole stack in Terraform (db+app) + semantic toggle in the web UI** |
 | `step-33` | **Firecrawl broad-web source** (`FirecrawlSource`, review-domain filter) |
+| `step-34` | **Tiered aggregation (anti-throttle)** — tier order, early-stop, circuit breaker |
 
 `main` is the finished version.

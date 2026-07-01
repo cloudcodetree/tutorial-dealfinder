@@ -1,48 +1,85 @@
-"""Aggregate one search across every live source, dedup, and rank by value.
+"""Tiered aggregation that avoids throttling.
 
-With real multi-source data there's no synthetic "fair price" — the deal signal
-is the market itself: how far below the median of all offers a given price sits.
-That's a real, source-agnostic deal score.
+Sources are grouped into tiers (cheap/reliable = low tier). We query tier by
+tier and STOP as soon as we have enough deduped offers — so pricey, rate-limited
+browser scrapers only run when the fast APIs came up short. A circuit breaker
+benches any source that errors or throttles for a cooldown window, so one flaky
+/ rate-limited source never gets hammered on the next search.
+
+With real multi-source data the deal signal is the market itself: how far below
+the median of all offers a price sits.
 """
 from __future__ import annotations
 
 import statistics
+import time
 
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
 
+COOLDOWN_SECONDS = 90.0
+TARGET_RESULTS = 12  # once we have this many deduped offers, stop escalating
 
-def aggregate(query: str, sources=LIVE_SOURCES, limit: int = 24) -> dict:
-    # Use real retail sources when any are configured; fall back to keyless
-    # sources (e.g. iTunes media) only when nothing else is available.
-    available = [s for s in sources if s.available()]
-    real = [s for s in available if not getattr(s, "fallback_only", False)]
-    chosen = real or available
+_cooldown: dict[str, float] = {}  # source name → monotonic time it's benched until
 
-    products, live = [], []
-    for s in chosen:
+
+def _benched(name: str) -> bool:
+    return time.monotonic() < _cooldown.get(name, 0.0)
+
+
+def _bench(name: str) -> None:
+    _cooldown[name] = time.monotonic() + COOLDOWN_SECONDS
+
+
+def _tier(s) -> int:
+    return getattr(s, "tier", 5)
+
+
+def _is_fallback(s) -> bool:
+    return getattr(s, "fallback_only", False)
+
+
+def aggregate(query: str, sources=LIVE_SOURCES, limit: int = 24, target: int = TARGET_RESULTS) -> dict:
+    available = [s for s in sources if s.available() and not _benched(s.name)]
+    real = [s for s in available if not _is_fallback(s)]
+
+    products, live, throttled = [], [], []
+
+    def run(src) -> None:
         try:
-            found = s.search(query)
+            found = src.search(query)
             if found:
-                live.append(s.name)
+                live.append(src.name)
                 products.extend(found)
-        except Exception:  # one flaky source must not sink the search
-            continue
+        except Exception:  # error or rate-limit → bench it, don't retry this round
+            _bench(src.name)
+            throttled.append(src.name)
 
-    # dedup across sources, keeping the cheapest for each item
+    # cheapest/most-reliable tier first; stop escalating once we have enough
+    for tier in sorted({_tier(s) for s in real}):
+        for src in (s for s in real if _tier(s) == tier):
+            run(src)
+        if len({dedup_key(p) for p in products}) >= target:
+            break
+
+    # nothing from real sources → fall back to keyless (e.g. iTunes)
+    if not products:
+        for src in (s for s in available if _is_fallback(s)):
+            run(src)
+
     best: dict[str, object] = {}
     for p in products:
         k = dedup_key(p)
         if k not in best or p.price < best[k].price:
             best[k] = p
     items = list(best.values())
-
     median = statistics.median([p.price for p in items]) if items else 0.0
     ranked = sorted(items, key=lambda p: p.price)[:limit]
 
     return {
         "query": query,
         "sources_live": live,
+        "throttled": throttled,
         "median_price": round(median, 2),
         "count": len(ranked),
         "results": [

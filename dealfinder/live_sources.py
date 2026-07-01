@@ -59,6 +59,7 @@ class ItunesSource:
 
 class RapidApiSource:
     name = "RapidAPI"
+    tier = 1  # fast, generous limits — try first
     _host = "real-time-product-search.p.rapidapi.com"
 
     def available(self) -> bool:
@@ -90,6 +91,7 @@ class RapidApiSource:
 
 class ApifySource:
     name = "Apify"
+    tier = 2  # structured but costs credits / slower
 
     def available(self) -> bool:
         return bool(os.getenv("APIFY_TOKEN"))
@@ -127,6 +129,7 @@ class FirecrawlSource:
     keep only results that carry a real price. Needs FIRECRAWL_API_KEY."""
 
     name = "Firecrawl"
+    tier = 3  # broad-web, rate-limited — escalate to only if needed
     # editorial / review domains that quote prices but aren't a place to buy
     _SKIP = {"rtings.com", "nytimes.com", "techradar.com", "cnet.com", "tomsguide.com",
              "wired.com", "theverge.com", "pcmag.com", "forbes.com", "reddit.com",
