@@ -12,6 +12,7 @@ parse into this typed shape — or it's rejected."
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from pydantic import BaseModel
@@ -55,21 +56,32 @@ def build_prompt(text: str) -> str:
 
 
 def parse_llm_json(raw: str) -> ListingSpecs:
-    """Validate an LLM's JSON text into the schema (raises if it doesn't fit)."""
-    return ListingSpecs.model_validate(json.loads(raw))
+    """Validate an LLM's JSON text into the schema (raises if it doesn't fit).
+
+    Tolerates code fences / prose around the JSON by grabbing the first object."""
+    m = re.search(r"\{.*\}", raw.strip(), re.S)
+    return ListingSpecs.model_validate(json.loads(m.group(0) if m else raw))
 
 
-def llm_extract(text: str, client=None, model: str = "gpt-4o-mini") -> ListingSpecs:
-    """Production path: prompt an LLM at temperature 0 and validate the result.
+def llm_extract(text: str, client=None) -> ListingSpecs:
+    """Extract via LLM, degrading gracefully to the deterministic extractor.
 
-    `client` is any OpenAI-compatible chat client. Without one we fall back to
-    the deterministic extractor so the pipeline always runs.
+    Order: an explicit OpenAI-compatible `client` → OpenRouter (tiered models) →
+    rule_extract. So the pipeline always returns something valid.
     """
-    if client is None:
-        return rule_extract(text)
-    resp = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        messages=[{"role": "user", "content": build_prompt(text)}],
-    )
-    return parse_llm_json(resp.choices[0].message.content)
+    if client is not None:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0,
+            messages=[{"role": "user", "content": build_prompt(text)}],
+        )
+        return parse_llm_json(resp.choices[0].message.content)
+
+    if os.getenv("OPENROUTER_API_KEY"):
+        from .llm import chat
+        try:
+            raw = chat([{"role": "user", "content": build_prompt(text)}], temperature=0, json_mode=True)
+            return parse_llm_json(raw)
+        except Exception:
+            pass  # every model throttled/unavailable → fall through
+
+    return rule_extract(text)

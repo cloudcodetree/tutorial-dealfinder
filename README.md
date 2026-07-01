@@ -74,5 +74,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-32` | **Whole stack in Terraform (db+app) + semantic toggle in the web UI** |
 | `step-33` | **Firecrawl broad-web source** (`FirecrawlSource`, review-domain filter) |
 | `step-34` | **Tiered aggregation (anti-throttle)** — tier order, early-stop, circuit breaker |
+| `step-35` | **OpenRouter LLM** — tiered models + graceful degrade; real Part-6 extraction (`llm.py`) |
 
 `main` is the finished version.
