@@ -97,6 +97,7 @@ resource "docker_container" "app" {
     "EBAY_CAMPAIGN_ID=${var.ebay_campaign_id}",
     "OPENROUTER_API_KEY=${var.openrouter_api_key}",
     "SHOPIFY_STORES=${var.shopify_stores}",
+    "BESTBUY_API_KEY=${var.bestbuy_api_key}",
   ]
 
   ports {

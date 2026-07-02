@@ -81,3 +81,9 @@ variable "shopify_stores" {
   default     = ""
   description = "Comma-separated Shopify store domains to scrape /products.json (blank = built-in defaults)."
 }
+
+variable "bestbuy_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}

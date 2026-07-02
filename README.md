@@ -77,5 +77,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-35` | **OpenRouter LLM** — tiered models + graceful degrade; real Part-6 extraction (`llm.py`) |
 | `step-36` | **eBay Browse API source** — official search, used+new, affiliate-ready (`EbaySource`) |
 | `step-37` | **Shopify /products.json source** — keyless, low-risk niche retail (`ShopifySource`) |
+| `step-38` | **Best Buy API source** + curated Shopify defaults (`BestBuySource`) |
 
 `main` is the finished version.

@@ -28,6 +28,20 @@ def test_firecrawl_off_without_key(monkeypatch):
 
 
 @respx.mock
+def test_bestbuy_search_maps_saleprice(monkeypatch):
+    from dealfinder.live_sources import BestBuySource
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products.*").mock(
+        return_value=httpx.Response(200, json={"products": [
+            {"sku": 123, "name": "4K TV", "salePrice": 399.99, "regularPrice": 499.99,
+             "url": "https://bestbuy.com/tv", "image": "http://img", "manufacturer": "Sony"},
+        ]}))
+    out = BestBuySource().search("4k tv")
+    assert len(out) == 1
+    assert out[0].price == 399.99 and out[0].source == "BestBuy:sale" and out[0].brand == "Sony"
+
+
+@respx.mock
 def test_shopify_filters_catalog_by_query(monkeypatch):
     from dealfinder.live_sources import ShopifySource
     monkeypatch.setenv("SHOPIFY_STORES", "teststore.com")

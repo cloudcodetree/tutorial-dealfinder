@@ -193,6 +193,47 @@ class EbaySource:
         return out
 
 
+class BestBuySource:
+    """Best Buy Developer API — official, free product/price search (US electronics).
+    No scraping, no blocking. Surfaces sale vs regular price. Needs BESTBUY_API_KEY
+    (free at developer.bestbuy.com)."""
+
+    name = "BestBuy"
+    tier = 1
+
+    def available(self) -> bool:
+        return bool(os.getenv("BESTBUY_API_KEY"))
+
+    def search(self, query: str, limit: int = 15) -> list[Product]:
+        key = os.getenv("BESTBUY_API_KEY")
+        if not key:
+            return []
+        tokens = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 1][:6]
+        if not tokens:
+            return []
+        pred = "&".join(f"search={t}" for t in tokens)
+        show = "sku,name,salePrice,regularPrice,url,image,manufacturer"
+        url = (f"https://api.bestbuy.com/v1/products({pred})?apiKey={key}"
+               f"&format=json&show={show}&pageSize={limit}&sort=salePrice.asc")
+        r = httpx.get(url, timeout=20)
+        if r.status_code != 200:
+            return []
+        out = []
+        for p in r.json().get("products", []):
+            price = _f(p.get("salePrice"))
+            if not price:
+                continue
+            reg = p.get("regularPrice")
+            on_sale = bool(reg) and p.get("salePrice", reg) < reg
+            out.append(Product(
+                id=f"bestbuy-{p.get('sku')}", title=(p.get("name") or query)[:120],
+                brand=p.get("manufacturer"), category="product", price=price,
+                url=p.get("url") or "", source=self.name + (":sale" if on_sale else ""),
+                image_url=p.get("image"),
+            ))
+        return out
+
+
 class ShopifySource:
     """Keyless, low-risk retail: most Shopify stores expose a public
     /products.json feed. Point it at stores relevant to your niche via
@@ -201,7 +242,12 @@ class ShopifySource:
 
     name = "Shopify"
     tier = 3
-    DEFAULT_STORES = ["deathwishcoffee.com", "www.allbirds.com", "www.kith.com"]
+    # Verified to expose /products.json (probed 2026-07); override via SHOPIFY_STORES.
+    DEFAULT_STORES = [
+        "deathwishcoffee.com", "www.allbirds.com", "www.kith.com", "chubbiesshorts.com",
+        "brooklinen.com", "drsquatch.com", "peakdesign.com", "tentree.com",
+        "www.spigen.com", "www.hexclad.com",
+    ]
 
     def _stores(self) -> list[str]:
         env = os.getenv("SHOPIFY_STORES")
@@ -289,4 +335,5 @@ class FirecrawlSource:
         return out
 
 
-LIVE_SOURCES = [EbaySource(), RapidApiSource(), ApifySource(), ShopifySource(), FirecrawlSource(), ItunesSource()]
+LIVE_SOURCES = [EbaySource(), RapidApiSource(), BestBuySource(), ApifySource(),
+                ShopifySource(), FirecrawlSource(), ItunesSource()]
