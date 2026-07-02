@@ -75,3 +75,9 @@ variable "openrouter_api_key" {
   sensitive = true
   default   = ""
 }
+
+variable "shopify_stores" {
+  type        = string
+  default     = ""
+  description = "Comma-separated Shopify store domains to scrape /products.json (blank = built-in defaults)."
+}

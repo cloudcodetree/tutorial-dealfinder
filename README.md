@@ -76,5 +76,6 @@ git checkout step-02   # then step-03, step-04, …
 | `step-34` | **Tiered aggregation (anti-throttle)** — tier order, early-stop, circuit breaker |
 | `step-35` | **OpenRouter LLM** — tiered models + graceful degrade; real Part-6 extraction (`llm.py`) |
 | `step-36` | **eBay Browse API source** — official search, used+new, affiliate-ready (`EbaySource`) |
+| `step-37` | **Shopify /products.json source** — keyless, low-risk niche retail (`ShopifySource`) |
 
 `main` is the finished version.

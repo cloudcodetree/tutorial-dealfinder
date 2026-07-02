@@ -96,6 +96,7 @@ resource "docker_container" "app" {
     "EBAY_CERT_ID=${var.ebay_cert_id}",
     "EBAY_CAMPAIGN_ID=${var.ebay_campaign_id}",
     "OPENROUTER_API_KEY=${var.openrouter_api_key}",
+    "SHOPIFY_STORES=${var.shopify_stores}",
   ]
 
   ports {

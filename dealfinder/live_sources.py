@@ -193,6 +193,60 @@ class EbaySource:
         return out
 
 
+class ShopifySource:
+    """Keyless, low-risk retail: most Shopify stores expose a public
+    /products.json feed. Point it at stores relevant to your niche via
+    SHOPIFY_STORES (comma-separated domains); we fetch the catalog and filter by
+    query. Structured, generally unblocked, no anti-bot evasion."""
+
+    name = "Shopify"
+    tier = 3
+    DEFAULT_STORES = ["deathwishcoffee.com", "www.allbirds.com", "www.kith.com"]
+
+    def _stores(self) -> list[str]:
+        env = os.getenv("SHOPIFY_STORES")
+        return [s.strip() for s in env.split(",") if s.strip()] if env else self.DEFAULT_STORES
+
+    def available(self) -> bool:
+        return True  # keyless
+
+    def search(self, query: str, limit: int = 15) -> list[Product]:
+        tokens = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if len(t) > 2]
+        out: list[Product] = []
+        for store in self._stores():
+            try:
+                r = httpx.get(f"https://{store}/products.json", params={"limit": 250},
+                              headers={"User-Agent": "Mozilla/5.0"}, timeout=15, follow_redirects=True)
+                if r.status_code != 200:
+                    continue
+                per_store = 0
+                for p in r.json().get("products", []):
+                    tags = p.get("tags") or []
+                    if isinstance(tags, str):
+                        tags = tags.split(",")
+                    hay = f"{p.get('title', '')} {p.get('product_type', '')} {' '.join(tags)}".lower()
+                    if tokens and not all(t in hay for t in tokens):
+                        continue
+                    v = (p.get("variants") or [{}])[0]
+                    price = _f(v.get("price"))
+                    if not price:
+                        continue
+                    imgs = p.get("images") or []
+                    out.append(Product(
+                        id=f"shopify-{store}-{p.get('id')}", title=(p.get("title") or query)[:120],
+                        brand=p.get("vendor"), category="product", price=price,
+                        url=f"https://{store}/products/{p.get('handle', '')}",
+                        source=f"{self.name}:{store}",
+                        image_url=(imgs[0].get("src") if imgs else None),
+                    ))
+                    per_store += 1
+                    if per_store >= limit:
+                        break
+            except Exception:
+                continue
+        return out
+
+
 class FirecrawlSource:
     """Broad-web source via Firecrawl search: catches long-tail retailers the
     structured shopping APIs miss. Noisier (page-level, not product-level), so we
@@ -235,4 +289,4 @@ class FirecrawlSource:
         return out
 
 
-LIVE_SOURCES = [EbaySource(), RapidApiSource(), ApifySource(), FirecrawlSource(), ItunesSource()]
+LIVE_SOURCES = [EbaySource(), RapidApiSource(), ApifySource(), ShopifySource(), FirecrawlSource(), ItunesSource()]

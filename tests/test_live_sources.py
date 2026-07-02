@@ -28,6 +28,21 @@ def test_firecrawl_off_without_key(monkeypatch):
 
 
 @respx.mock
+def test_shopify_filters_catalog_by_query(monkeypatch):
+    from dealfinder.live_sources import ShopifySource
+    monkeypatch.setenv("SHOPIFY_STORES", "teststore.com")
+    respx.get("https://teststore.com/products.json").mock(return_value=httpx.Response(200, json={"products": [
+        {"id": 1, "title": "Dark Roast Coffee", "handle": "dark-roast", "vendor": "Store",
+         "product_type": "Coffee", "tags": ["beans"], "variants": [{"price": "14.99"}], "images": [{"src": "http://img"}]},
+        {"id": 2, "title": "Plain T-Shirt", "handle": "tee", "vendor": "Store",
+         "tags": [], "variants": [{"price": "20.00"}], "images": []},
+    ]}))
+    out = ShopifySource().search("coffee")
+    assert len(out) == 1                       # only the matching product
+    assert out[0].price == 14.99 and "teststore.com" in out[0].source
+
+
+@respx.mock
 def test_ebay_oauth_then_browse_search(monkeypatch):
     from dealfinder.live_sources import EbaySource
     monkeypatch.setenv("EBAY_APP_ID", "chrishar-DealFind-SBX-abc")
