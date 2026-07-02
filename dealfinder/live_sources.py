@@ -14,8 +14,10 @@ Add a source = add a class. Nothing downstream changes.
 """
 from __future__ import annotations
 
+import base64
 import os
 import re
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -123,6 +125,74 @@ class ApifySource:
         return out
 
 
+class EbaySource:
+    """eBay Browse API — official first-party search over live marketplace inventory
+    (new + used/refurb), no scraping, no blocking. Adds resale deals the retail
+    APIs miss. OAuth client-credentials with token caching; sandbox/prod chosen by
+    the app id (…-SBX-… = sandbox) or EBAY_ENV. Set EBAY_CAMPAIGN_ID to earn
+    affiliate commission via the returned affiliate URL."""
+
+    name = "eBay"
+    tier = 1  # official API, fast + reliable
+
+    def __init__(self) -> None:
+        self._token: str | None = None
+        self._expires = 0.0
+
+    def _base(self) -> str:
+        app = os.getenv("EBAY_APP_ID", "")
+        sandbox = os.getenv("EBAY_ENV", "").lower() == "sandbox" or "SBX" in app
+        return "https://api.sandbox.ebay.com" if sandbox else "https://api.ebay.com"
+
+    def available(self) -> bool:
+        return bool(os.getenv("EBAY_APP_ID") and os.getenv("EBAY_CERT_ID"))
+
+    def _get_token(self) -> str:
+        if self._token and time.monotonic() < self._expires:
+            return self._token
+        creds = f"{os.getenv('EBAY_APP_ID')}:{os.getenv('EBAY_CERT_ID')}"
+        b64 = base64.b64encode(creds.encode()).decode()
+        r = httpx.post(
+            self._base() + "/identity/v1/oauth2/token",
+            headers={"Authorization": f"Basic {b64}", "Content-Type": "application/x-www-form-urlencoded"},
+            data={"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        j = r.json()
+        self._token = j["access_token"]
+        self._expires = time.monotonic() + j.get("expires_in", 7200) - 60
+        return self._token
+
+    def search(self, query: str, limit: int = 15) -> list[Product]:
+        if not self.available():
+            return []
+        headers = {"Authorization": f"Bearer {self._get_token()}"}
+        campaign = os.getenv("EBAY_CAMPAIGN_ID")
+        if campaign:  # affiliate attribution → itemAffiliateWebUrl in the response
+            headers["X-EBAY-C-ENDUSERCTX"] = f"affiliateCampaignId={campaign}"
+        r = httpx.get(
+            self._base() + "/buy/browse/v1/item_summary/search",
+            headers=headers, params={"q": query, "limit": str(limit)}, timeout=30,
+        )
+        if r.status_code != 200:
+            return []
+        out = []
+        for it in (r.json().get("itemSummaries") or []):
+            price = _f((it.get("price") or {}).get("value"))
+            if not price:
+                continue
+            cond = it.get("condition") or "eBay"
+            out.append(Product(
+                id=f"ebay-{str(it.get('itemId', ''))[-40:]}",
+                title=(it.get("title") or query)[:120], brand=None, category="product",
+                price=price, currency=(it.get("price") or {}).get("currency", "USD"),
+                url=it.get("itemAffiliateWebUrl") or it.get("itemWebUrl") or "",
+                source=f"{self.name}:{cond}", image_url=(it.get("image") or {}).get("imageUrl"),
+            ))
+        return out
+
+
 class FirecrawlSource:
     """Broad-web source via Firecrawl search: catches long-tail retailers the
     structured shopping APIs miss. Noisier (page-level, not product-level), so we
@@ -165,4 +235,4 @@ class FirecrawlSource:
         return out
 
 
-LIVE_SOURCES = [ItunesSource(), RapidApiSource(), ApifySource(), FirecrawlSource()]
+LIVE_SOURCES = [EbaySource(), RapidApiSource(), ApifySource(), FirecrawlSource(), ItunesSource()]

@@ -92,6 +92,10 @@ resource "docker_container" "app" {
     "APIFY_ACTOR=${var.apify_actor}",
     "RAPIDAPI_KEY=${var.rapidapi_key}",
     "FIRECRAWL_API_KEY=${var.firecrawl_api_key}",
+    "EBAY_APP_ID=${var.ebay_app_id}",
+    "EBAY_CERT_ID=${var.ebay_cert_id}",
+    "EBAY_CAMPAIGN_ID=${var.ebay_campaign_id}",
+    "OPENROUTER_API_KEY=${var.openrouter_api_key}",
   ]
 
   ports {

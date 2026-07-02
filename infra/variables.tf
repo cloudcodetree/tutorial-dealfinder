@@ -52,3 +52,26 @@ variable "firecrawl_api_key" {
   sensitive = true
   default   = ""
 }
+
+variable "ebay_app_id" {
+  type    = string
+  default = ""
+}
+
+variable "ebay_cert_id" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "ebay_campaign_id" {
+  type        = string
+  default     = ""
+  description = "eBay Partner Network campaign id → affiliate URLs (optional)."
+}
+
+variable "openrouter_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
