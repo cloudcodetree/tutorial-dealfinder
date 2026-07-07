@@ -1,24 +1,32 @@
-"""Score the extractor on the golden set and A/B it against a baseline.
+"""Score the two-signal ranker on the golden set and A/B it against median-only.
 
 Run:  python -m dealfinder.run_evals
 """
 from __future__ import annotations
 
-from .evals import ab_compare, brand_only_extract, evaluate
-from .extract import rule_extract
+from .evals import (
+    GATE_PRECISION,
+    ab_compare,
+    evaluate,
+    median_only_ranker,
+    two_signal_ranker,
+)
 
 
 def main() -> None:
-    rule = evaluate(rule_extract)
-    base = evaluate(brand_only_extract)
-    print(f"golden set: {rule['n']} cases\n")
-    print(f"  rule_extract   exact_match = {rule['exact_match']:.2f}   field_acc = {rule['field_accuracy']:.2f}")
-    print(f"  brand_only     exact_match = {base['exact_match']:.2f}   field_acc = {base['field_accuracy']:.2f}")
+    two = evaluate(two_signal_ranker)
+    med = evaluate(median_only_ranker)
+    print(f"golden set: {two['n']} labeled snapshot items\n")
+    print(f"  two_signal   precision@5 = {two['precision_at_5']:.2f}   gate {'PASS ✓' if two['passes_gate'] else 'FAIL ✗'}")
+    print(f"  median_only  precision@5 = {med['precision_at_5']:.2f}   gate {'PASS ✓' if med['passes_gate'] else 'FAIL ✗'}")
 
-    ab = ab_compare("rule_extract", rule["field_accuracy"], "brand_only", base["field_accuracy"])
-    print(f"\nA/B: winner = {ab['winner']} (+{ab['delta']:.2f} field accuracy)")
-    gate = rule["exact_match"] >= 0.90
-    print(f"CI gate (exact_match >= 0.90): {'PASS ✓' if gate else 'FAIL ✗'}")
+    ab = ab_compare("two_signal", two["precision_at_5"], "median_only", med["precision_at_5"])
+    print(f"\nA/B: winner = {ab['winner']} (+{ab['delta']:.2f} precision@5)")
+    print(f"CI gate (precision@5 >= {GATE_PRECISION:.2f}): {'PASS ✓' if two['passes_gate'] else 'FAIL ✗'}")
+
+    print("\ntwo_signal top-5:")
+    for t in two["top5"]:
+        print(f"  [{t['label']:10}] {t['title'][:60]}")
 
 
 if __name__ == "__main__":

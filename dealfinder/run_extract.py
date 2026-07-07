@@ -1,4 +1,4 @@
-"""Extract structured specs from messy listings.
+"""Extract structured specs from messy, retailer-polluted electronics listings.
 
 Run:  python -m dealfinder.run_extract
 (With an OpenAI-compatible client wired in, swap rule_extract for llm_extract.)
@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from .extract import rule_extract
 
+# Real retailer-polluted titles from the snapshot — the true brand is in the
+# title text, not the (retailer) brand field.
 LISTINGS = [
-    "TrailLite UL2 — ultralight 2-person tent, just 1.1kg, 3-season",
-    "SummitPro 4-season expedition tent, sleeps 4, 3.2 kg",
-    "BasecampCo family tent (sleeps 3), 2-season, 2400 g",
-    "ValueOutdoors solo backpacker — 1 person, 3 season, 1.6kg",
+    "Walmart - COWIN SE7 Active Noise Cancelling Headphones Bluetooth",
+    "Anker Soundcore Q20i Hybrid Active Noise Cancelling Headphones",
+    "Sony WH-1000XM5 Wireless Headphones",
+    "SAMSUNG 990 PRO 2TB PCIe 4.0 NVMe M.2 Internal SSD",
+    "Apple MacBook Air M2 (Refurbished) 13-inch Laptop",
 ]
 
 

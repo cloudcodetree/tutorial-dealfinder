@@ -1,5 +1,5 @@
 from dealfinder.agent import Action, Agent, Tool
-from dealfinder.tools import nl_to_sql
+from dealfinder.tools import build_db, load_catalog, nl_to_sql, run_sql
 
 
 def _scripted(script):
@@ -24,9 +24,19 @@ def test_hitl_blocks_unapproved_action():
     assert answer == "halted"
 
 
-def test_nl_to_sql_builds_where_clause():
-    sql = nl_to_sql("2-person tents under $400 from TrailLite")
+def test_nl_to_sql_builds_electronics_where_clause():
+    sql = nl_to_sql("find a good noise-cancelling headphone under $120 from Sony")
     assert sql == (
-        "SELECT * FROM catalog WHERE price < 400 AND capacity = 2 "
-        "AND brand = 'TrailLite'"
+        "SELECT * FROM catalog WHERE price < 120 AND category = 'audio' "
+        "AND title LIKE '%Sony%' AND title LIKE '%headphone%'"
     )
+
+
+def test_nl_to_sql_runs_against_the_real_catalog():
+    con = build_db(load_catalog())
+    rows = run_sql(con, nl_to_sql("noise-cancelling headphone under $120"))
+    assert rows                                   # the query returns real audio items
+    assert all(r["category"] == "audio" and r["price"] < 120 for r in rows)
+    assert all("headphone" in r["title"].lower() for r in rows)
+    # the honest Anker deal is in the result set
+    assert any("Q20i" in r["title"] for r in rows)

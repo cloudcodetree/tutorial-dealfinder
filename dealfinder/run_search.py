@@ -1,5 +1,10 @@
 """Search the catalog four ways and show how each stage changes the results.
 
+Runs over the real snapshot with the cached title embeddings; the "noise
+cancelling headphones" query surfaces the hero cast, and the value rerank blends
+in the two-signal deal score so the honest Anker Q20i rises above the Bose-QC45
+trap.
+
 Run:  python -m dealfinder.run_search
 """
 from __future__ import annotations
@@ -7,46 +12,42 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .deal import deal_score
-from .dealmodel import LinearModel
 from .embed import embed_texts, product_text
-from .features import feature_matrix
-from .schema import Product
-from .search import BM25, cosine_rank, rrf_fuse, value_rerank
+from .recommend import load_catalog_embeddings
+from .search import BM25, cosine_rank, rrf_fuse, search_catalog
+from .snapshot import load_products
 
-QUERY = "ultralight 2-person tent for backpacking"
+QUERY = "noise cancelling headphones"
 K = 5
 
 
 def main() -> None:
-    catalog = [Product.model_validate(r) for r in json.loads(Path("data/sample/catalog.json").read_text())]
-    texts = [product_text(p) for p in catalog]
+    d = json.loads(Path("data/snapshots/electronics-2026-07.json").read_text())
+    nch_ids = {i["id"] for i in d["items"] if i["query"] == QUERY}
+    medians = {i["id"]: i["median_price_at_capture"] for i in d["items"]}
 
-    # deal score per index, from the Part-3 price model
-    X = feature_matrix(catalog)
-    model = LinearModel().fit(X, [p.price for p in catalog])
-    fair = model.predict(X)
-    deal = {i: deal_score(catalog[i].price, fair[i]) for i in range(len(catalog))}
+    catalog = [p for p in load_products() if p.id in nch_ids]
+    _, emb = load_catalog_embeddings(catalog)
+    texts = [product_text(p) for p in catalog]
 
     def show(label, ids):
         print(f"\n{label}:")
         for i in ids[:K]:
-            pct = deal[i] * 100
-            tag = f"{abs(pct):.0f}% {'under' if pct >= 0 else 'over'} fair"
-            print(f"  {catalog[i].id}: {catalog[i].title:<24} ${catalog[i].price:>6.0f}  ({tag})")
+            print(f"  {catalog[i].title[:44]:44} ${catalog[i].price:>7.2f}")
 
-    doc_vecs = embed_texts(texts)
     qv = embed_texts([QUERY])[0]
-    semantic = [i for i, _ in cosine_rank(qv, doc_vecs, K)]
+    semantic = [i for i, _ in cosine_rank(qv, emb, K)]
     keyword = [i for i, _ in BM25(texts).search(QUERY, K)]
     hybrid = rrf_fuse([semantic, keyword], top=K)
-    valued = value_rerank(hybrid, deal, alpha=0.5)
 
     print(f'query: "{QUERY}"')
     show("semantic (meaning)", semantic)
     show("keyword (BM25)", keyword)
     show("hybrid (RRF fusion)", hybrid)
-    show("reranked by value (relevance + deal)", valued)
+
+    print("\nreranked by value (relevance + two-signal deal score):")
+    for _, p, deal in search_catalog(QUERY, catalog, emb, medians, k=K):
+        print(f"  {p.title[:44]:44} ${p.price:>7.2f}  (deal {deal:+.2f})")
 
 
 if __name__ == "__main__":

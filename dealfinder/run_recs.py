@@ -1,42 +1,42 @@
-"""Demo both recommenders and score collaborative filtering offline.
+"""Demo both recommenders over the real snapshot and score CF offline.
+
+content-based: "more like the Sony WH-1000XM5" via the cached title embeddings.
+collaborative: "people who liked this also liked…" over the real interaction log.
 
 Run:  python -m dealfinder.run_recs
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import numpy as np
 
-from .features import feature_matrix
 from .ranking import ndcg_at_k, precision_at_k
-from .recommend import collaborative_recommend, content_recommend
-from .schema import Product
+from .recommend import (
+    collaborative_recommend,
+    load_interactions,
+    similar_products,
+)
+from .snapshot import load_snapshot
 
 K = 5
 
 
 def main() -> None:
-    catalog = [Product.model_validate(r) for r in json.loads(Path("data/sample/catalog.json").read_text())]
-    titles = [p.title for p in catalog]
-    X = feature_matrix(catalog)
-
-    # --- content-based: "more like this" ---
-    ref = 1
-    print(f'content-based — more like "{titles[ref]}":')
-    for j in content_recommend(ref, X, k=3):
-        print(f"  {catalog[j].id}: {titles[j]}")
-
-    data = json.loads(Path("data/sample/interactions.json").read_text())
-    R = np.array(data["matrix"])
+    # --- content-based: "more like this" over cached title embeddings ---
+    ref = "Sony WH-1000XM5 Wireless Headphones"
+    print(f'content-based — more like "{ref}":')
+    for r in similar_products(ref, k=3):
+        print(f"  ${r['price']:>7.2f}  [{r['category']}] {r['title']}")
 
     # --- collaborative: "people who liked these also liked" ---
-    u = 0
-    liked = [titles[j] for j in np.where(R[u] > 0)[0]]
-    print(f"\ncollaborative — user 0 liked: {', '.join(liked[:4])}{' …' if len(liked) > 4 else ''}")
-    for j in collaborative_recommend(R[u], R, k=3):
-        print(f"  {catalog[j].id}: {titles[j]}")
+    item_ids, R = load_interactions()
+    titles = {row["id"]: row["title"] for row in load_snapshot()}
+    idx = next(i for i, iid in enumerate(item_ids)
+               if titles[iid] == ref)
+    user = np.zeros(len(item_ids))
+    user[idx] = 1
+    print(f'\ncollaborative — a user who liked "{ref}":')
+    for j in collaborative_recommend(user, R, k=3):
+        print(f"  {titles[item_ids[j]][:50]}")
 
     # --- offline eval: leave-one-out, CF vs a popularity baseline ---
     popularity = list(np.argsort(-R.sum(axis=0)))

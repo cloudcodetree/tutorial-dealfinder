@@ -4,15 +4,17 @@ Defense in depth — never trust input, never trust model output, and log
 everything:
   - detect_prompt_injection: flag user text trying to hijack instructions.
   - redact_pii: strip emails / phones / cards before logging or prompting.
-  - validate_listing_specs: range checks beyond type (a schema says int; this
-    says a sane int).
+  - validate_listing_specs: value checks beyond type (a schema says str; this
+    says a *known* category and a valid condition).
   - AuditLog: a tamper-evident-ish trail of who did what.
 """
 from __future__ import annotations
 
 import re
 
-from .extract import ListingSpecs
+from .extract import KNOWN_CATEGORIES, ListingSpecs
+
+_VALID_CONDITIONS = {"new", "refurb", "used"}
 
 _INJECTION = [
     r"ignore (all |the )?previous",
@@ -40,14 +42,12 @@ def redact_pii(text: str) -> str:
 
 
 def validate_listing_specs(specs: ListingSpecs) -> list[str]:
-    """Range/sanity checks beyond the type schema. Returns a list of problems."""
+    """Value/sanity checks beyond the type schema. Returns a list of problems."""
     errors = []
-    if specs.capacity is not None and not (1 <= specs.capacity <= 12):
-        errors.append("capacity out of range")
-    if specs.weight_kg is not None and not (0 < specs.weight_kg < 50):
-        errors.append("weight_kg out of range")
-    if specs.season is not None and specs.season not in (1, 2, 3, 4):
-        errors.append("season invalid")
+    if specs.category is not None and specs.category not in KNOWN_CATEGORIES:
+        errors.append("category unknown")
+    if specs.condition not in _VALID_CONDITIONS:
+        errors.append("condition invalid")
     return errors
 
 

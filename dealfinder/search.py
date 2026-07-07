@@ -2,7 +2,11 @@
 then reranked by value.
 
 Each piece is small and independently testable. The neural embedding lives in
-embed.py; here we only need the vectors, so the math stays pure and offline.
+embed.py; here we only need the vectors, so the math stays pure and offline. The
+snapshot-backed ``search_catalog`` at the bottom wires them together over the
+real corpus: the query "noise cancelling headphones" surfaces the hero cast, and
+the value rerank blends in the Part-3 two-signal deal score so the honest Anker
+Q20i deal rises above the too-good-to-be-true Bose-QC45 trap.
 """
 from __future__ import annotations
 
@@ -76,3 +80,53 @@ def value_rerank(doc_ids: list, deal_scores: dict, alpha: float = 0.5) -> list:
         for d in doc_ids
     }
     return sorted(doc_ids, key=lambda d: -combined[d])
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-backed convenience: the whole pipeline over the real corpus.
+# ---------------------------------------------------------------------------
+def _two_signal_deal_scores(products, medians: dict) -> dict:
+    """Per-index two-signal deal score (median blended with the model residual).
+
+    Demotes the too-good-to-be-true traps below genuine deals, exactly as the
+    Part-3 verdict does — so a value rerank rewards the honest Anker, not the Bose.
+    """
+    from .dealmodel import LinearModel
+    from .dealscore import fair_price, median_signal, residual_fraction
+    from .features import feature_matrix, featurize
+
+    by_cat: dict[str, list] = {}
+    for p in products:
+        by_cat.setdefault(p.category, []).append(p)
+    models = {
+        c: LinearModel().fit(feature_matrix(ps), [p.price for p in ps])
+        for c, ps in by_cat.items() if len(ps) >= 3
+    }
+    scores: dict[int, float] = {}
+    for i, p in enumerate(products):
+        m = median_signal(p.price, medians.get(p.id, 0.0))
+        model = models.get(p.category)
+        if model is None:
+            scores[i] = m
+            continue
+        rf = residual_fraction(p.price, fair_price(model, featurize(p)))
+        scores[i] = m - 1.0 if (m >= 0.15 and rf > 0.70) else m
+    return scores
+
+
+def search_catalog(query: str, products, embeddings, medians: dict, k: int = 5, alpha: float = 0.5):
+    """Semantic + BM25 → RRF → value rerank over the real snapshot catalog.
+
+    ``embeddings`` is the cached title-embedding matrix aligned to ``products``;
+    ``medians`` maps product id → its same-query median (for the deal signal).
+    Returns the reranked top-k as ``(index, product, deal_score)`` triples.
+    """
+    from .embed import embed_texts, product_text
+
+    qv = embed_texts([query])[0]
+    semantic = [i for i, _ in cosine_rank(qv, embeddings, len(products))]
+    keyword = [i for i, _ in BM25([product_text(p) for p in products]).search(query, len(products))]
+    hybrid = rrf_fuse([semantic, keyword], top=max(k * 3, k))
+    deal = _two_signal_deal_scores(products, medians)
+    valued = value_rerank(hybrid, deal, alpha=alpha)[:k]
+    return [(i, products[i], deal[i]) for i in valued]

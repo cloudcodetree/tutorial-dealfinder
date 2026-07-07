@@ -36,5 +36,5 @@ def test_llm_extract_degrades_to_rule_when_all_models_fail(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "x")
     respx.post(OR).mock(return_value=httpx.Response(429, json={"error": "rate limited"}))
     # every model throttled → falls back to the deterministic extractor
-    s = llm_extract("TrailLite UL2 ultralight 2-person tent, 1.1kg, 3-season")
-    assert s.brand == "TrailLite" and s.capacity == 2 and s.weight_kg == 1.1
+    s = llm_extract("Sony WH-1000XM5 Wireless Headphones")
+    assert s.brand == "Sony" and s.category == "audio" and s.model == "WH-1000XM5"
