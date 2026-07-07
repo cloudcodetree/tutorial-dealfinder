@@ -17,7 +17,12 @@ import re
 
 from pydantic import BaseModel
 
-from .features import BRAND_TIER
+# Tent-domain brand vocabulary for the structured-extraction part. (The broad
+# electronics regeneration moved the price-model brand tiers into features.py;
+# this extractor still works over the tent listing fixtures its tests use.)
+KNOWN_TENT_BRANDS = (
+    "TrailLite", "SummitPro", "BasecampCo", "RidgeRunner", "ValueOutdoors", "BudgetTrail",
+)
 
 
 class ListingSpecs(BaseModel):
@@ -29,7 +34,7 @@ class ListingSpecs(BaseModel):
 
 def rule_extract(text: str) -> ListingSpecs:
     """Heuristic extraction — a deterministic stand-in for the LLM (offline)."""
-    brand = next((b for b in BRAND_TIER if b.lower() in text.lower()), None)
+    brand = next((b for b in KNOWN_TENT_BRANDS if b.lower() in text.lower()), None)
 
     cap = re.search(r"(\d+)\s*-?\s*person|sleeps\s+(\d+)|\bUL(\d+)\b", text, re.I)
     capacity = int(next(g for g in cap.groups() if g)) if cap else None

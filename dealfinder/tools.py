@@ -11,7 +11,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from .features import BRAND_TIER
+from .extract import KNOWN_TENT_BRANDS
 from .schema import Product
 
 CATALOG = Path("data/sample/catalog.json")
@@ -25,7 +25,7 @@ def nl_to_sql(question: str, table: str = "catalog") -> str:
         clauses.append(f"price > {m.group(1)}")
     if m := re.search(r"(\d+)\s*-?\s*person|sleeps?\s+(\d+)", question, re.I):
         clauses.append(f"capacity = {m.group(1) or m.group(2)}")
-    brand = next((b for b in BRAND_TIER if b.lower() in question.lower()), None)
+    brand = next((b for b in KNOWN_TENT_BRANDS if b.lower() in question.lower()), None)
     if brand:
         clauses.append(f"brand = '{brand}'")
     where = " AND ".join(clauses) if clauses else "1=1"

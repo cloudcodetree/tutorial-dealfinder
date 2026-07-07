@@ -35,3 +35,34 @@ def test_train_test_split_is_deterministic():
     assert len(te1) == 5 and len(tr1) == 15
     assert list(tr1) == list(tr2) and list(te1) == list(te2)
     assert set(tr1).isdisjoint(te1)  # no leakage
+
+
+def test_trains_on_the_real_snapshot_features():
+    # The from-scratch baseline must fit on the real broad-electronics features
+    # end to end. R^2 is intentionally weak on heterogeneous data — that failure
+    # is what motivates the §4 upgrade — so we only assert it runs and predicts.
+    from dealfinder.features import feature_matrix
+    from dealfinder.snapshot import load_products
+
+    products = load_products()
+    X = feature_matrix(products)
+    y = np.array([p.price for p in products])
+    model = LinearModel().fit(X, y)
+    preds = model.predict(X)
+    assert preds.shape == (len(products),)
+    assert np.all(np.isfinite(preds))
+
+
+def test_brand_tier_drives_audio_fair_prices():
+    # Within the comparable audio category, flagship (tier 4) fair price should
+    # exceed budget (tier 2) fair price — the separation the trap guard needs.
+    from dealfinder.features import feature_matrix, featurize
+    from dealfinder.snapshot import load_products
+
+    audio = [p for p in load_products() if p.category == "audio"]
+    model = LinearModel().fit(feature_matrix(audio), [p.price for p in audio])
+    bose = next(p for p in audio if "QuietComfort 45" in p.title)   # tier 4
+    anker = next(p for p in audio if "Q20i" in p.title)             # tier 2
+    fair_bose = model.predict(np.array([featurize(bose)]))[0]
+    fair_anker = model.predict(np.array([featurize(anker)]))[0]
+    assert fair_bose > fair_anker
