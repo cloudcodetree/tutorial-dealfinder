@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealfinder-config
+  namespace: dealfinder
+  labels:
+    app.kubernetes.io/name: dealfinder
+# Non-secret configuration. Secrets (DATABASE_URL, API keys, JWT secret, Stripe
+# key) live in the Secret — see secret.example.yaml. Both are mounted into the
+# app via `envFrom` (see deployment.yaml).
+data:
+  # Which non-keyed Shopify stores to scrape (blank = the app's built-in list).
+  SHOPIFY_STORES: ""
+  # Default Apify actor for the Google-Shopping source.
+  APIFY_ACTOR: "automation-lab~google-shopping-scraper"
+  # Uvicorn/app tuning.
+  PORT: "8000"
+  LOG_LEVEL: "info"

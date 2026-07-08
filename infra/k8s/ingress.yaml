@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dealfinder-app
+  namespace: dealfinder
+  labels:
+    app.kubernetes.io/name: dealfinder
+  annotations:
+    # SSE (GET /search/stream) must not be buffered by the proxy, or the browser
+    # won't see results stream in. These are nginx-ingress hints; swap for your
+    # controller's equivalents (or an ALB annotation set) as needed.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.dealfinder.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dealfinder-app
+                port:
+                  name: http
+  # Terminate TLS at the ingress. Provision the cert with cert-manager (or your
+  # cloud's cert) and reference the resulting Secret here.
+  tls:
+    - hosts:
+        - api.dealfinder.example.com
+      secretName: dealfinder-tls

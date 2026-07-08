@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealfinder-app
+  namespace: dealfinder
+  labels:
+    app.kubernetes.io/name: dealfinder
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealfinder
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealfinder
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: app
+          # Same artifact as the Dockerfile / Terraform stack (dealfinder-app).
+          # Push it to your registry and pin by tag or digest here.
+          image: ghcr.io/cloudcodetree/dealfinder-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          # Config + secrets flow in as env, exactly like the Terraform stack's
+          # container env. The app reads DATABASE_URL, SUPABASE_JWT_SECRET, the
+          # Stripe keys, and the live-source keys from the environment.
+          envFrom:
+            - configMapRef:
+                name: dealfinder-config
+            - secretRef:
+                name: dealfinder-secrets
+          # /healthz is the real health endpoint in dealfinder/serve.py.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            # The committed Dockerfile runs as root; harden what we safely can
+            # without a non-root image. To enforce runAsNonRoot, add a non-root
+            # USER to the Dockerfile first, then set runAsNonRoot: true here.
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
