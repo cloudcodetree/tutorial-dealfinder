@@ -10,6 +10,9 @@ dev = ["pytest>=8", "respx>=0.21", "ruff>=0.5"]
 # The Part-17 PyTorch training loop. Heavy CPU wheel, kept optional so the core
 # install stays light; `pip install .[torch]` (or `pip install torch`) enables it.
 torch = ["torch>=2.2"]
+# The Part-18 experiment tracking + model registry. Heavy (Flask/SQLAlchemy/etc),
+# kept optional so the core install stays light; `pip install .[mlflow]` enables it.
+mlflow = ["mlflow>=3.1"]
 
 [build-system]
 requires = ["setuptools>=68"]
