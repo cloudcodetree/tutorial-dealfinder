@@ -13,6 +13,11 @@ torch = ["torch>=2.2"]
 # The Part-18 experiment tracking + model registry. Heavy (Flask/SQLAlchemy/etc),
 # kept optional so the core install stays light; `pip install .[mlflow]` enables it.
 mlflow = ["mlflow>=3.1"]
+# The Part-16 orchestration (Prefect flow with retries/caching + a data-quality
+# gate). Optional so the core install stays light; `pip install .[prefect]` makes
+# flows.py run on a real Prefect engine. Without it, flows.py falls back to the
+# same DAG as plain functions (dealfinder/flows.py documents both paths).
+prefect = ["prefect>=3.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
