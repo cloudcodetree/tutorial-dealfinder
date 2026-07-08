@@ -3,3 +3,8 @@ dist
 *.local
 .env
 *.tsbuildinfo
+
+# Playwright e2e (Part 32)
+/test-results/
+/playwright-report/
+/playwright/.cache/
