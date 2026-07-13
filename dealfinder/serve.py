@@ -133,6 +133,26 @@ def semantic(q: str, k: int = 12):
     return {"query": q, "count": len(rows), "results": rows}
 
 
+@app.get("/ask")
+def ask(q: str, k: int = 5):
+    """RAG: retrieve real listings for the query, then GENERATE a grounded answer.
+
+    Returns the `RagAnswer` — the synthesized answer, the retrieved item ids it
+    used as `sources`, whether it passed the faithfulness check (`grounded`), and
+    whether an LLM produced it (`used_llm`). With no OPENROUTER_API_KEY the
+    deterministic extractive path answers, so this route works fully offline."""
+    from .rag import answer as rag_answer
+
+    a = rag_answer(q, k=k)
+    return {
+        "query": q,
+        "answer": a.answer,
+        "sources": a.sources,
+        "grounded": a.grounded,
+        "used_llm": a.used_llm,
+    }
+
+
 @app.get("/sources")
 def sources():
     """Which live sources are configured right now."""
