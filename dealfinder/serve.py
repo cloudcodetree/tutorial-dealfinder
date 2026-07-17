@@ -153,6 +153,30 @@ def ask(q: str, k: int = 5):
     }
 
 
+@app.get("/ask_agentic")
+def ask_agentic(q: str, max_hops: int = 3):
+    """Agentic RAG: retrieve → judge sufficiency → reformulate & retry → answer.
+
+    Unlike `/ask` (one retrieval), the agent re-queries when the evidence is weak.
+    Returns the grounded answer plus the full `hops` trajectory — each hop's query,
+    the gate's verdict, and why — so the reasoning is inspectable. Fully offline:
+    the sufficiency gate and the corpus-mined reformulator are deterministic."""
+    from .agentic_rag import agentic_answer
+
+    a = agentic_answer(q, max_hops=max_hops)
+    return {
+        "query": q,
+        "answer": a.answer,
+        "grounded": a.grounded,
+        "used_llm": a.used_llm,
+        "sources": a.sources,
+        "hops": [
+            {"query": h.query, "sufficient": h.sufficient, "reason": h.reason, "verdicts": h.verdicts}
+            for h in a.hops
+        ],
+    }
+
+
 @app.get("/sources")
 def sources():
     """Which live sources are configured right now."""
