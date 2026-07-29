@@ -41,7 +41,7 @@ def main() -> None:
     actual_test = [y[i] for i in test_idx]
     print(f"trained on {len(train_idx)} listings, tested on {len(test_idx)}")
     print(f"  MAE  = ${mae(actual_test, pred_test):.2f}")
-    print(f"  R^2  = {r2(actual_test, pred_test):.3f}   (broad data → weak; see §4/Part 17)")
+    print(f"  R^2  = {r2(actual_test, pred_test):.3f}   (broad data → weak; see §4/Part 21)")
 
     print("\nlearned price drivers (intercept + per-feature $):")
     print(f"  intercept      {model.coef_[0]:+.1f}")

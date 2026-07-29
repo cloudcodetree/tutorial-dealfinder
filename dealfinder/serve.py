@@ -18,10 +18,11 @@ from . import pgstore
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
-from .dealmodel import LinearModel
-from .features import feature_matrix
+from .dealscore import fair_price
+from .features import featurize
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
+from .rag import _category_models
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
@@ -42,9 +43,15 @@ def _embed_texts(texts):
 
 _catalog = load_catalog()
 _idx = {p.id: i for i, p in enumerate(_catalog)}
-_X = feature_matrix(_catalog)
-_model = LinearModel().fit(_X, [p.price for p in _catalog])
-_fair = {p.id: float(fp) for p, fp in zip(_catalog, _model.predict(_X))}
+# Fair price uses the SAME per-category models as search/RAG (Part 3's audio model
+# pins the hero-cast fair prices, e.g. Anker $108.33), so /deal agrees with the
+# verdict badges and the tutorials — not a divergent global model.
+_cat_models = _category_models(_catalog)
+_fair = {
+    p.id: float(fair_price(_cat_models[p.category], featurize(p)))
+    if p.category in _cat_models else float(p.price)
+    for p in _catalog
+}
 
 
 @app.get("/healthz")
