@@ -124,13 +124,31 @@ def search_stream(q: str):
 
 @app.get("/semantic")
 def semantic(q: str, k: int = 12):
-    """Search everything ever aggregated, by meaning (pgvector)."""
-    if not _DB:
-        raise HTTPException(status_code=503, detail="no database configured")
-    rows = pgstore.semantic_search(_embed_texts([q])[0], k=k)
-    for r in rows:
-        r["similarity"] = round(float(r["similarity"]), 3)
-    return {"query": q, "count": len(rows), "results": rows}
+    """Search by meaning.
+
+    With a database, searches everything ever aggregated (pgvector). Without one,
+    it falls back to in-memory value-reranked retrieval over the frozen snapshot —
+    so meaning-search works fully offline, the same way ``/ask`` does. Each result
+    carries its two-signal deal verdict so the UI can badge DEAL/SUSPICIOUS."""
+    if _DB:
+        rows = pgstore.semantic_search(_embed_texts([q])[0], k=k)
+        for r in rows:
+            r["similarity"] = round(float(r["similarity"]), 3)
+        return {"query": q, "count": len(rows), "results": rows, "backend": "pgvector"}
+
+    # Offline fallback: the Part 5 retriever over the snapshot (Part 15's `retrieve`).
+    from .rag import retrieve
+
+    results = []
+    for it in retrieve(q, k=k):
+        p = _catalog[_idx[it.id]] if it.id in _idx else None
+        results.append({
+            "id": it.id, "title": it.title, "price": it.price, "source": it.source,
+            "verdict": it.verdict, "pct_under_median": round(it.median_signal * 100),
+            "reason": it.reason,
+            "url": getattr(p, "url", None), "image_url": getattr(p, "image_url", None),
+        })
+    return {"query": q, "count": len(results), "results": results, "backend": "snapshot"}
 
 
 @app.get("/ask")

@@ -28,6 +28,8 @@
   .price { font-weight:800; font-size:16px; }
   .src { font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--mut); border:1px solid var(--line); border-radius:5px; padding:1px 6px; }
   .deal { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--green); font-weight:700; }
+  .vbadge { font-family:ui-monospace,Menlo,monospace; font-size:10px; font-weight:700; border:1px solid; border-radius:5px; padding:1px 7px; }
+  .sub { font-family:ui-monospace,Menlo,monospace; font-size:11px; font-weight:700; }
   .empty { color:var(--mut); text-align:center; padding:40px 0; }
   .note { font-size:12px; color:var(--mut); text-align:center; margin-top:22px; line-height:1.6; }
   code { background:#0b0f14; padding:1px 5px; border-radius:4px; color:#cdd7e2; }
@@ -60,18 +62,39 @@ const safeUrl = (u) => { try { const x = new URL(u, location.origin); return (x.
 
 const mode = () => (document.querySelector('input[name=mode]:checked') || {}).value || "live";
 
+const VERDICT = {
+  deal:       ["#3fb950", "DEAL"],
+  fair:       ["#58a6ff", "FAIR"],
+  suspicious: ["#f0a30a", "SUSPICIOUS"],
+  overpriced: ["#8b98a8", "OVERPRICED"],
+};
+
 function card(p) {
   const href = safeUrl(p.url), img = safeUrl(p.image_url);
-  const dealPct = Number(p.deal_pct) || 0;
-  const sim = p.similarity != null ? Math.round(Number(p.similarity) * 100) : null;
-  const badge = dealPct > 0 ? `<span class="deal">▼ ${esc(dealPct)}% under median</span>`
-              : sim != null ? `<span class="deal">◎ ${esc(sim)}% match</span>` : ``;
+  let vbadge = "", sub = "";
+  if (p.verdict && VERDICT[p.verdict]) {
+    // Two-signal deal verdict (snapshot/meaning path): badge + honest sub-line.
+    const [c, label] = VERDICT[p.verdict];
+    const pct = Number(p.pct_under_median) || 0;
+    vbadge = `<span class="vbadge" style="color:${c};border-color:${c}66;background:${c}22">${label}</span>`;
+    if (p.verdict === "deal")            sub = `<span class="sub" style="color:#3fb950">▼ ${esc(pct)}% under median</span>`;
+    else if (p.verdict === "suspicious") sub = `<span class="sub" style="color:#f0a30a">⚠ looks ${esc(pct)}% under — but flagged</span>`;
+    else if (p.verdict === "overpriced") sub = `<span class="sub" style="color:#8b98a8">▲ ${esc(Math.abs(pct))}% over median</span>`;
+    else                                 sub = `<span class="sub" style="color:#58a6ff">≈ near median</span>`;
+  } else {
+    // Live-search / pgvector path: percent-under-median or match score.
+    const dealPct = Number(p.deal_pct) || 0;
+    const sim = p.similarity != null ? Math.round(Number(p.similarity) * 100) : null;
+    sub = dealPct > 0 ? `<span class="deal">▼ ${esc(dealPct)}% under median</span>`
+        : sim != null ? `<span class="deal">◎ ${esc(sim)}% match</span>` : ``;
+  }
   return `
     <a class="card" href="${href || '#'}" target="_blank" rel="noopener noreferrer">
       ${img ? `<img class="thumb" src="${esc(img)}" alt="">` : `<div class="thumb"></div>`}
-      <div>
+      <div style="min-width:0">
+        ${vbadge ? `<div class="row" style="margin:0 0 4px">${vbadge}</div>` : ``}
         <div class="title">${esc(p.title)}</div>
-        <div class="row"><span class="price">${esc(fmt(p.price))}</span>${badge}</div>
+        <div class="row"><span class="price">${esc(fmt(p.price))}</span>${sub}</div>
         <div class="row"><span class="src">${esc(p.source)}</span></div>
       </div>
     </a>`;
@@ -86,7 +109,8 @@ async function run(q) {
     if (r.status === 503) { $("meta").textContent = "meaning search needs a database (set DATABASE_URL)"; $("go").disabled = false; return; }
     const d = await r.json();
     if (m === "meaning") {
-      $("meta").textContent = `${d.count} matches by meaning · across all saved deals`;
+      const scope = d.backend === "pgvector" ? "across all saved deals" : "across the frozen snapshot";
+      $("meta").textContent = `${d.count} matches by meaning · ${scope}`;
     } else {
       const live = (d.sources_live || []).join(", ") || "none";
       $("meta").textContent = `${d.count} offers · sources live: ${live} · median ${fmt(d.median_price)}`;
