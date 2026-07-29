@@ -1,4 +1,4 @@
-"""Experiment tracking (Part 18) — offline, local SQLite MLflow store.
+"""Experiment tracking (Part 22) — offline, local SQLite MLflow store.
 
 Pins the model-selection wiring: on the shared fair-price feature contract the
 GBDT run wins by MAE ($138.11), the metrics are logged, and the winner is

@@ -1,4 +1,4 @@
-"""Inference optimization, for real (Part 23): what actually makes serving cheaper
+"""Inference optimization, for real (Part 27): what actually makes serving cheaper
 and faster — measured where we can, honestly anchored where a GPU is required.
 
 Four levers, clearly labelled **measured** vs **illustrative**:

@@ -1,6 +1,6 @@
-"""Supply-chain safety for the tool surface — the threats Part 22 didn't cover.
+"""Supply-chain safety for the tool surface — the threats Part 25 didn't cover.
 
-Part 22 hardened the *model* surface: prompt injection in listings, PII, output
+Part 25 hardened the *model* surface: prompt injection in listings, PII, output
 validation. But DealFinder both **exposes** an MCP server (Part 12) and **consumes**
 tools, and the agent reads every tool's *description* as trusted context. That
 opens a supply-chain surface the news is full of — Agentjacking, SymJack, poisoned
@@ -44,7 +44,7 @@ class ToolVerdict:
 def scan_tool(tool: dict) -> ToolVerdict:
     """Scan one tool descriptor (``name`` + ``description``) for poisoning.
 
-    Flags injected instructions (reusing the Part 22 detector) and tool-specific
+    Flags injected instructions (reusing the Part 25 detector) and tool-specific
     red-flag phrases. A clean DealFinder tool passes; a description that tries to
     steer the agent fails.
     """

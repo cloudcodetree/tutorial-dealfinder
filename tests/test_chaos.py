@@ -1,4 +1,4 @@
-"""Chaos / graceful-degradation tests for the tiered aggregator (Part 32).
+"""Chaos / graceful-degradation tests for the tiered aggregator (Part 36).
 
 Offline and deterministic: every "source" here is an in-process stub, so these
 run in CI with no network and no API keys. They pin the *resilience* behaviour

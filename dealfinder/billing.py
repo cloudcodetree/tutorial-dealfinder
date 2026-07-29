@@ -1,4 +1,4 @@
-"""Payments & SaaS mechanics (Part 30) — Stripe Checkout, webhooks, metering.
+"""Payments & SaaS mechanics (Part 34) — Stripe Checkout, webhooks, metering.
 
 Real Stripe integration in test-mode shape:
 

@@ -1,4 +1,4 @@
-"""Dataset engineering (Part 15): turn the frozen snapshot into a labeled,
+"""Dataset engineering (Part 19): turn the frozen snapshot into a labeled,
 leakage-safe training set — sampling, labeling, splitting, class imbalance.
 
 This is the bridge between the raw corpus and the ML parts. It does three jobs a
@@ -29,7 +29,7 @@ snapshot is a single capture with **no ``price_history``** on the rows (it is
 empty for all 270 — verify with ``load_snapshot``), so there is no real time axis
 to split on yet. ``temporal_split`` is provided as the honest hook: it splits on
 whatever ordering key you pass (e.g. a capture timestamp once the pipeline in
-Part 16 records one), and its docstring says plainly that on *this* snapshot it
+Part 20 records one), and its docstring says plainly that on *this* snapshot it
 degrades to an index split. We do not pretend to a temporal split the data can't
 support.
 """

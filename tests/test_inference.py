@@ -1,4 +1,4 @@
-"""Inference optimization (Part 23) — offline. Pins the MEASURED pieces (semantic
+"""Inference optimization (Part 27) — offline. Pins the MEASURED pieces (semantic
 cache hit rate + the cosine threshold that governs it, and the router escalation
 logic) and asserts the illustrative/anchored pieces are honestly flagged.
 """

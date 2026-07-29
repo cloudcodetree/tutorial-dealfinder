@@ -1,4 +1,4 @@
-"""Offline billing tests (Part 30).
+"""Offline billing tests (Part 34).
 
 No live Stripe. Webhook signatures are built with Stripe's own HMAC scheme
 (t=<ts>,v1=<sig> over "<ts>.<payload>") against a test secret, and the checkout

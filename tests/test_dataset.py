@@ -1,4 +1,4 @@
-"""Dataset engineering (Part 15) on the frozen snapshot.
+"""Dataset engineering (Part 19) on the frozen snapshot.
 
 Deterministic and offline: labels come from the committed snapshot via the same
 two-signal deal score the rest of the course uses. The load-bearing assertions

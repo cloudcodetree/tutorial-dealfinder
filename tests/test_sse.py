@@ -1,4 +1,4 @@
-"""Offline SSE test (Part 27 backend).
+"""Offline SSE test (Part 31 backend).
 
 Deterministic: we swap the live sources for a snapshot-backed stub, so the
 /search/stream endpoint streams without touching the network. Live use pulls

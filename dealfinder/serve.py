@@ -83,7 +83,7 @@ def _stream_search(query: str, sources):
     """Yield SSE frames: one `results` event per source that responds, then a
     terminal `done` event with the deduped/ranked view.
 
-    This is the streaming twin of `aggregate()` for the Part 27 web front end:
+    This is the streaming twin of `aggregate()` for the Part 31 web front end:
     the browser paints offers as each source lands instead of blocking on the
     slowest one. It degrades gracefully — sources that are unconfigured or throw
     are simply skipped, so it still streams from whatever is live (or the
@@ -116,7 +116,7 @@ def _stream_search(query: str, sources):
 
 @app.get("/search/stream")
 def search_stream(q: str):
-    """Stream live search results as Server-Sent Events (Part 27 backend).
+    """Stream live search results as Server-Sent Events (Part 31 backend).
 
     `text/event-stream`: emits one `results` event per responding source as the
     aggregator produces them, then a final `done` event. Reuses the same live
@@ -210,7 +210,7 @@ def sources():
 
 @app.get("/me")
 def me(user: User = Depends(require_user)):
-    """Demo protected route (Part 28). Returns the caller identity from their
+    """Demo protected route (Part 32). Returns the caller identity from their
     verified Supabase JWT. Auth is *opt-in* per route — the public search/deal
     routes above stay open; only routes that depend on `require_user` are gated.
     Runs live with the learner's own SUPABASE_JWT_SECRET."""

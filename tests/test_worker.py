@@ -1,4 +1,4 @@
-"""Saved searches & the periodic-suggestions worker (Part 29) over the snapshot.
+"""Saved searches & the periodic-suggestions worker (Part 33) over the snapshot.
 
 Deterministic and offline: the worker searches the frozen snapshot with the same
 retrieval + two-signal deal score the rest of the course uses, so the notified

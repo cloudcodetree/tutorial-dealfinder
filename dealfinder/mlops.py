@@ -1,4 +1,4 @@
-"""Closing the MLOps loop (Part 20): drift → retrain → eval gate → promote.
+"""Closing the MLOps loop (Part 24): drift → retrain → eval gate → promote.
 
 The pieces exist already; this part *wires them into a loop* and makes the
 promotion decision explicit and auditable. One cycle:
@@ -143,7 +143,7 @@ def eval_gate(challenger: str) -> GateReport:
     """Run the eval gate for a named challenger ranker (precision@5 ≥ 0.80).
 
     ``two_signal`` scores 1.00 (passes); ``median_only`` scores 0.40 (fails) — the
-    too-good-to-be-true traps top its list (spec §9.4, Part 19).
+    too-good-to-be-true traps top its list (spec §9.4, Part 23).
     """
     ranker = RANKERS[challenger]
     res = evaluate(ranker)

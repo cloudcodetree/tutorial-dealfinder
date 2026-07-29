@@ -1,4 +1,4 @@
-"""Pipelines & orchestration (Part 16) over the frozen snapshot.
+"""Pipelines & orchestration (Part 20) over the frozen snapshot.
 
 Deterministic and offline. The load-bearing assertions run the whole DAG
 (ingest → normalize → data-quality gate → label → good_deals model) end-to-end

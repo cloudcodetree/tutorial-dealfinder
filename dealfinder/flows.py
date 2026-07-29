@@ -1,4 +1,4 @@
-"""Pipelines & orchestration (Part 16): a real, runnable Prefect flow that turns
+"""Pipelines & orchestration (Part 20): a real, runnable Prefect flow that turns
 the frozen snapshot into a labeled, quality-gated training table.
 
 The DAG is the boring-but-hireable shape every batch ML pipeline has::
@@ -191,7 +191,7 @@ def quality_gate(rows: list[dict]) -> ContractReport:
 
 
 def label_rows(path: str | None = None) -> LabeledDataset:
-    """Stage 4 — label: build the two-signal labeled dataset (Part 15 reused)."""
+    """Stage 4 — label: build the two-signal labeled dataset (Part 19 reused)."""
     return build_labeled_dataset(path)
 
 

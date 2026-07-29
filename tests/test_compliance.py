@@ -1,4 +1,4 @@
-"""Security & compliance at scale (Part 31) — extends Part 21's safety.py.
+"""Security & compliance at scale (Part 35) — extends Part 25's safety.py.
 
 Deterministic and offline: the rate limiter and abuse detector take an injected
 clock (no wall-clock), the GDPR store is in-memory, and audit entries are
@@ -51,7 +51,7 @@ def test_rate_limiter_rejects_bad_limit():
 
 
 # ---------------------------------------------------------------------------
-# GDPR data-subject requests (export + delete), audited via Part 21's AuditLog.
+# GDPR data-subject requests (export + delete), audited via Part 25's AuditLog.
 # ---------------------------------------------------------------------------
 def test_export_returns_a_users_records_and_audits():
     store = DataSubjectStore()
@@ -95,7 +95,7 @@ def test_delete_removes_records_and_is_audited():
 
 
 def test_store_reuses_part21_audit_log():
-    # It EXTENDS Part 21: the trail is a real safety.AuditLog, not a re-implementation.
+    # It EXTENDS Part 25: the trail is a real safety.AuditLog, not a re-implementation.
     store = DataSubjectStore()
     assert isinstance(store.audit, AuditLog)
 

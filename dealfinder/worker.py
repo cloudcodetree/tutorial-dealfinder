@@ -1,4 +1,4 @@
-"""Saved searches & the periodic-suggestions worker (Part 29).
+"""Saved searches & the periodic-suggestions worker (Part 33).
 
 A user saves a search ("noise cancelling headphones"). A background job runs that
 search on a schedule, and whenever a *new* good deal shows up for it, it notifies

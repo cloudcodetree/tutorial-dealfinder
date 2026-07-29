@@ -1,4 +1,4 @@
-"""ML & DL breadth (Part 17) on the frozen snapshot.
+"""ML & DL breadth (Part 21) on the frozen snapshot.
 
 Deterministic and offline. Pins the REAL gradient-boosting MAE against the linear
 baseline (relative improvement, not the old narrow-tent "$80→$35" fantasy), the

@@ -1,4 +1,4 @@
-"""Closing the MLOps loop (Part 20) — deterministic, offline against the snapshot.
+"""Closing the MLOps loop (Part 24) — deterministic, offline against the snapshot.
 
 Pins the real numbers of one drift → retrain → eval-gate → promote cycle:
 a mild shift does NOT trip drift; a strong shift trips it (PSI ≥ 0.2); the

@@ -1,4 +1,4 @@
-"""Offline auth tests (Part 28).
+"""Offline auth tests (Part 32).
 
 No network, no live Supabase. We mint tokens with a throwaway secret via the
 same HS256 scheme Supabase uses, then exercise the real verifier. Live use needs

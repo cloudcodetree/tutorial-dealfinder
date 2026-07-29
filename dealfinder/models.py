@@ -1,4 +1,4 @@
-"""ML & DL breadth (Part 17): gradient boosting, a price-drop forecaster, and a
+"""ML & DL breadth (Part 21): gradient boosting, a price-drop forecaster, and a
 real PyTorch training loop — all on the frozen snapshot's §4 features.
 
 Part 3 motivates this: the from-scratch **linear** baseline in ``dealmodel.py`` is

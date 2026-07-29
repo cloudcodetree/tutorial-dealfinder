@@ -1,4 +1,4 @@
-"""Auth & accounts (Part 28) — verifying Supabase-issued JWTs.
+"""Auth & accounts (Part 32) — verifying Supabase-issued JWTs.
 
 This is the real, standard Supabase pattern: Supabase Auth signs every session
 JWT with your project's JWT secret (HS256). Your API trusts a request by

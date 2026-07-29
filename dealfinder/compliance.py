@@ -1,6 +1,6 @@
-"""Security & compliance at scale (Part 31) — EXTENDS Part 21's ``safety.py``.
+"""Security & compliance at scale (Part 35) — EXTENDS Part 25's ``safety.py``.
 
-Part 21 (``safety.py``) owns the *single-request* model surface: prompt-injection
+Part 25 (``safety.py``) owns the *single-request* model surface: prompt-injection
 detection, PII redaction, output validation, the audit log. This module does NOT
 re-implement any of that (spec §9.8) — it **imports and builds on it** for the
 *multi-tenant / at-scale* concerns a real SaaS has to answer:
@@ -8,10 +8,10 @@ re-implement any of that (spec §9.8) — it **imports and builds on it** for th
 - :class:`SlidingWindowRateLimiter` — per-user request throttling over a
   deterministic, injected clock (no wall-clock flakiness).
 - :class:`DataSubjectStore` — GDPR data-subject helpers: **export** and **delete**
-  a user's records from an in-memory store, every action written to Part 21's
+  a user's records from an in-memory store, every action written to Part 25's
   :class:`~dealfinder.safety.AuditLog`.
 - :class:`AbuseDetector` — velocity + repeated-injection abuse detection, reusing
-  Part 21's :func:`~dealfinder.safety.detect_prompt_injection` for the injection
+  Part 25's :func:`~dealfinder.safety.detect_prompt_injection` for the injection
   half (extends, doesn't reinvent).
 
 Everything is deterministic and offline: the clock is injected, there is no
@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-# EXTENDS Part 21: reuse its audit log and injection detector rather than
+# EXTENDS Part 25: reuse its audit log and injection detector rather than
 # re-implementing them (spec §9.8).
 from .safety import AuditLog, detect_prompt_injection
 
@@ -67,7 +67,7 @@ class SlidingWindowRateLimiter:
 
 
 # ---------------------------------------------------------------------------
-# GDPR data-subject requests (export + delete), audited via Part 21's AuditLog.
+# GDPR data-subject requests (export + delete), audited via Part 25's AuditLog.
 # ---------------------------------------------------------------------------
 @dataclass
 class DataSubjectStore:
@@ -75,7 +75,7 @@ class DataSubjectStore:
 
     Stands in for the tables that hold a user's data (saved searches, history,
     notifications). ``export`` satisfies a Subject Access Request; ``delete``
-    satisfies the Right to Erasure. Both write to Part 21's :class:`AuditLog` so
+    satisfies the Right to Erasure. Both write to Part 25's :class:`AuditLog` so
     there's a compliance trail (extends, does not re-implement — spec §9.8).
     """
 
@@ -103,7 +103,7 @@ class DataSubjectStore:
 
 
 # ---------------------------------------------------------------------------
-# Abuse detection (velocity + repeated injection), reusing Part 21's detector.
+# Abuse detection (velocity + repeated injection), reusing Part 25's detector.
 # ---------------------------------------------------------------------------
 @dataclass
 class AbuseSignal:
@@ -119,10 +119,10 @@ class AbuseDetector:
 
     - **velocity**: more than ``max_events`` requests within ``window`` seconds.
     - **injection**: at least ``max_injections`` prompt-injection attempts (each
-      classified by Part 21's :func:`detect_prompt_injection`) in the window.
+      classified by Part 25's :func:`detect_prompt_injection`) in the window.
 
-    Deterministic: timestamps are supplied by the caller. This *extends* Part 21 —
-    Part 21 answers "is THIS request an injection?"; this answers "is this USER,
+    Deterministic: timestamps are supplied by the caller. This *extends* Part 25 —
+    Part 25 answers "is THIS request an injection?"; this answers "is this USER,
     across many requests, abusing the system?".
     """
 
@@ -140,7 +140,7 @@ class AbuseDetector:
 
     def observe(self, user_id: str, text: str, now: float) -> AbuseSignal:
         """Record one request (text + time) and report the current abuse verdict."""
-        is_injection = detect_prompt_injection(text)  # Part 21 does the per-text call
+        is_injection = detect_prompt_injection(text)  # Part 25 does the per-text call
         events = self._events[user_id]
         events.append((now, is_injection))
 

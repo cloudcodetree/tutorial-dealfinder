@@ -1,7 +1,7 @@
-"""Experiment tracking & a model registry (Part 18): MLflow over the three real
+"""Experiment tracking & a model registry (Part 22): MLflow over the three real
 price models, against the frozen snapshot.
 
-Part 17 built three fair-price regressors — a from-scratch **linear** baseline
+Part 21 built three fair-price regressors — a from-scratch **linear** baseline
 (``dealmodel.py``), a **gradient-boosted** model (``models.gbdt_vs_linear``), and a
 real **PyTorch MLP** (``models.train_torch_pricehead``). Training them is only half
 the job; the other half is *remembering what you tried*. This module wraps each
@@ -72,7 +72,7 @@ def _require_mlflow():
     except Exception as e:  # pragma: no cover - exercised only without the extra
         raise RuntimeError(
             "mlflow is not installed; `pip install .[mlflow]` to enable experiment "
-            "tracking (Part 18)."
+            "tracking (Part 22)."
         ) from e
     return mlflow
 
@@ -261,7 +261,7 @@ def run_tracking(tracking_uri: str | None = None) -> TrackingResult:
     runs.append(
         RunRecord(
             "linear_baseline", "documented-baseline", doc.linear_mae, None,
-            params={"model": "LinearModel", "features": "hand-only", "source": "Part 17"},
+            params={"model": "LinearModel", "features": "hand-only", "source": "Part 21"},
             selectable=False,
         )
     )
