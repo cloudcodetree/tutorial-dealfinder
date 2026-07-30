@@ -6,7 +6,6 @@ the committed `electronics-2026-07.json`; regenerate the snapshot and they will
 """
 import statistics
 
-from dealfinder.features import title_brand
 from dealfinder.ingest import dedup_key, ingest
 from dealfinder.schema import Product
 from dealfinder.snapshot import load_snapshot, to_products
@@ -27,15 +26,16 @@ def test_snapshot_count():
 
 
 def test_brand_field_is_retailer_polluted():
-    # For most rows the manufacturer implied by the raw `brand` differs from the
-    # real manufacturer parsed from the title — i.e. `brand` is unreliable.
+    # 154 of 270 rows carry a retailer token in `brand` — the exact audit the
+    # extraction lesson (Part 6) documents and runs.
     items = load_snapshot()
+    retailers = ["Walmart", "Target", "Costco", "Macy", "Best Buy", "Amazon",
+                 "mountainlifestyle", "kohl"]
     polluted = sum(
-        1 for i in items
-        if title_brand(i["title"])
-        and title_brand(i.get("brand") or "") != title_brand(i["title"])
+        1 for x in items
+        if any(r.lower() in (x.get("brand") or "").lower() for r in retailers)
     )
-    assert polluted > 150  # ~220/270 by this measure; the point: don't trust `brand`
+    assert polluted == 154
 
 
 def test_hero_query_median_is_pinned():

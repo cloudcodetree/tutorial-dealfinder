@@ -167,7 +167,7 @@ def ingest_snapshot(path: str | None = None) -> list[dict]:
 def normalize_rows(rows: list[dict]) -> list[dict]:
     """Stage 2 — normalize: attach the TITLE-extracted true brand (spec §2).
 
-    The raw ``brand`` field is the retailer in 156/270 rows; ``title_brand`` pulls
+    The raw ``brand`` field is the retailer in 154/270 rows; ``title_brand`` pulls
     the real manufacturer out of the title. We add it as ``true_brand`` without
     dropping the original, so the contract still sees every column.
     """
