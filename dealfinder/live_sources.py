@@ -105,7 +105,12 @@ class ApifySource:
         actor = os.getenv("APIFY_ACTOR", "automation-lab~google-shopping-scraper")
         r = httpx.post(
             f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items",
-            params={"token": token}, json={"queries": [query], "maxResults": limit}, timeout=180,
+            params={"token": token},
+            # country/language pin the marketplace: without them the actor mixes in
+            # localized listings (Mercado Libre in MXN, etc.) whose prices would
+            # masquerade as USD and poison the cross-source median.
+            json={"queries": [query], "maxResults": limit, "country": "us", "language": "en"},
+            timeout=180,
         )
         body = r.json()
         out = []
@@ -113,6 +118,8 @@ class ApifySource:
             price = it.get("priceNumeric") or _f(it.get("price"))
             if not price:
                 continue
+            if (it.get("currency") or "USD").upper() != "USD":
+                continue  # belt-and-braces: never let a foreign-currency price into USD math
             merchant = it.get("merchant") or "shopping"
             out.append(Product(
                 id=f"apify-{(it.get('title') or '')[:40]}",
