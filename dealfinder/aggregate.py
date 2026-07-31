@@ -11,14 +11,17 @@ the median of all offers a price sits.
 """
 from __future__ import annotations
 
+import os
 import statistics
 import time
 
+from .dedup import dedup_by_embedding
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
 
-COOLDOWN_SECONDS = 90.0
-TARGET_RESULTS = 12  # once we have this many deduped offers, stop escalating
+# Overridable without touching source (tests pin the 90.0 default).
+COOLDOWN_SECONDS = float(os.getenv("DEALFINDER_COOLDOWN_SECONDS", "90"))
+TARGET_RESULTS = int(os.getenv("DEALFINDER_TARGET_RESULTS", "12"))  # once we have this many deduped offers, stop escalating
 
 _cooldown: dict[str, float] = {}  # source name → monotonic time it's benched until
 
@@ -72,7 +75,9 @@ def aggregate(query: str, sources=LIVE_SOURCES, limit: int = 24, target: int = T
         k = dedup_key(p)
         if k not in best or p.price < best[k].price:
             best[k] = p
-    items = list(best.values())
+    # semantic pass: collapse cross-retailer offers of the same product
+    # (the exact-key pass above only merges byte-identical brand|title rows)
+    items = dedup_by_embedding(list(best.values()))
     median = statistics.median([p.price for p in items]) if items else 0.0
     ranked = sorted(items, key=lambda p: p.price)[:limit]
 
