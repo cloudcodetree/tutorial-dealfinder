@@ -39,3 +39,15 @@ def test_schema_rejects_wrong_types():
     # structured output's whole point: a malformed field is caught, not ingested
     with pytest.raises(ValidationError):
         ListingSpecs(brand=123, category="audio", condition="new")
+
+
+def test_adapter_path_degrades_gracefully_when_artifact_missing():
+    """Part 10: adapter first in the chain, but a missing/broken artifact must
+    never break extraction — it falls through to rule_extract."""
+    from dealfinder.extract import llm_extract
+
+    s = llm_extract(
+        "Walmart - COWIN E7 Active Noise Cancelling Headphones Bluetooth",
+        adapter_path="/nonexistent/adapters/extractor-v1",
+    )
+    assert s.brand == "Cowin"  # rule_extract's answer — the chain bottomed out safely

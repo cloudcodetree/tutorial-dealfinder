@@ -119,12 +119,36 @@ def parse_llm_json(raw: str) -> ListingSpecs:
     return ListingSpecs.model_validate(json.loads(m.group(0) if m else raw))
 
 
-def llm_extract(text: str, client=None) -> ListingSpecs:
+def _adapter_extract(text: str, adapter_path: str) -> ListingSpecs:
+    """Run extraction with a local fine-tuned model (the Part-10 QLoRA artifact).
+
+    Loads the merged model directory saved by the Part-10 notebook. Heavy deps
+    (transformers/torch) import lazily so the core install never pays for them.
+    Raises on any failure — llm_extract catches and degrades down the chain.
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer  # lazy: GPU/optional path
+
+    tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+    model = AutoModelForCausalLM.from_pretrained(adapter_path, device_map="auto")
+    msgs = [{"role": "user", "content": build_prompt(text)}]
+    inputs = tokenizer.apply_chat_template(msgs, add_generation_prompt=True, return_tensors="pt").to(model.device)
+    out = model.generate(inputs, max_new_tokens=80, do_sample=False, pad_token_id=tokenizer.eos_token_id)
+    return parse_llm_json(tokenizer.decode(out[0][inputs.shape[1]:], skip_special_tokens=True))
+
+
+def llm_extract(text: str, client=None, adapter_path: str | None = None) -> ListingSpecs:
     """Extract via LLM, degrading gracefully to the deterministic extractor.
 
-    Order: an explicit OpenAI-compatible `client` → OpenRouter (tiered models) →
-    rule_extract. So the pipeline always returns something valid.
+    Order: fine-tuned adapter (if adapter_path set) → explicit OpenAI-compatible
+    `client` → OpenRouter (tiered models) → rule_extract. So the pipeline always
+    returns something valid.
     """
+    if adapter_path is not None:
+        try:
+            return _adapter_extract(text, adapter_path)
+        except Exception:
+            pass  # missing artifact / deps / GPU → fall through the chain
+
     if client is not None:
         resp = client.chat.completions.create(
             model="gpt-4o-mini", temperature=0,
