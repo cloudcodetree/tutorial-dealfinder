@@ -229,9 +229,14 @@ def is_grounded(answer_text: str, retrieved: list[RetrievedItem]) -> bool:
     if not retrieved:
         return False
 
-    retrieved_prices = {f"{it.price:.2f}" for it in retrieved}
+    # The allowed evidence is the *whole* context the model was given — which
+    # includes each listing's price AND the derived values in its reason line
+    # (the model's fair price, the query median). Validating only against listing
+    # prices would falsely flag an answer for citing the fair price the context
+    # itself supplied ("84% under model fair price $285").
+    allowed_prices = _prices_in(build_context(retrieved))
     for price in _prices_in(answer_text):
-        if price not in retrieved_prices:
+        if price not in allowed_prices:
             return False
 
     haystack = " " + _norm(" ".join(it.title for it in retrieved)) + " "
