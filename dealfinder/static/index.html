@@ -48,6 +48,7 @@
     <div style="display:flex;gap:16px;margin:2px 2px 8px;font-size:13px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="radio" name="mode" value="live" checked> live deals</label>
       <label><input type="radio" name="mode" value="meaning"> by meaning (saved)</label>
+      <label><input type="radio" name="mode" value="ask"> ask (agent)</label>
     </div>
     <div class="meta" id="meta"></div>
     <div class="grid" id="grid"></div>
@@ -100,11 +101,40 @@ function card(p) {
     </a>`;
 }
 
+// Render the agent's natural-language answer (from /ask_agentic). The answer is
+// model-generated markdown-ish text; escape it, then lift **bold** and line breaks.
+function answerPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${label}</span>`;
+  const body = esc(d.answer || "")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+  // Two independent, honest signals: which policy answered, and whether the
+  // faithfulness guard (Part 14) verified the answer against the retrieved text.
+  const policy = chip(d.used_llm ? "#58a6ff" : "#8b98a8", d.used_llm ? "LLM POLICY" : "DETERMINISTIC");
+  const faith  = chip(d.grounded ? "#3fb950" : "#f0a30a", d.grounded ? "✓ FAITHFULNESS PASSED" : "⚠ FAITHFULNESS FLAGGED");
+  return `<div class="card" style="display:block;padding:18px 20px;line-height:1.7">
+    <div class="row" style="margin:0 0 10px">${policy} ${faith}</div>
+    <div style="color:#e6edf3">${body}</div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
-  $("meta").textContent = m === "meaning" ? "searching saved deals by meaning…" : "searching live sources…";
+  $("meta").textContent = m === "meaning" ? "searching saved deals by meaning…"
+    : m === "ask" ? "the agent is reasoning — filter, then score by deal quality…"
+    : "searching live sources…";
   try {
+    if (m === "ask") {
+      const r = await fetch("/ask_agentic?q=" + encodeURIComponent(q));
+      const d = await r.json();
+      const n = (d.sources || []).length;
+      const hops = (d.hops || []).length;
+      $("meta").textContent = `agent answered${n ? ` · cites ${n} listing${n>1?"s":""}` : ""}${hops ? ` · ${hops} retrieval hop${hops>1?"s":""}` : ""}`;
+      $("grid").innerHTML = answerPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     const r = await fetch((m === "meaning" ? "/semantic?q=" : "/search?q=") + encodeURIComponent(q));
     if (r.status === 503) { $("meta").textContent = "meaning search needs a database (set DATABASE_URL)"; $("go").disabled = false; return; }
     const d = await r.json();
