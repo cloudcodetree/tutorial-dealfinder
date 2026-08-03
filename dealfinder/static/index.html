@@ -112,9 +112,28 @@ function answerPanel(d) {
   // faithfulness guard (Part 14) verified the answer against the retrieved text.
   const policy = chip(d.used_llm ? "#58a6ff" : "#8b98a8", d.used_llm ? "LLM POLICY" : "DETERMINISTIC");
   const faith  = chip(d.grounded ? "#3fb950" : "#f0a30a", d.grounded ? "✓ FAITHFULNESS PASSED" : "⚠ FAITHFULNESS FLAGGED");
-  return `<div class="card" style="display:block;padding:18px 20px;line-height:1.7">
+  // Agentic-RAG trajectory (Part 15): each hop re-queries when the evidence is
+  // too thin. Showing the reformulated queries makes the "agentic" loop visible.
+  let trace = "";
+  if ((d.hops || []).length > 1) {
+    const rows = d.hops.map((h, i) => {
+      const mark = h.sufficient
+        ? `<span style="color:#3fb950">✓ sufficient — answering</span>`
+        : `<span style="color:#f0a30a">↻ ${esc(h.reason)} — re-querying</span>`;
+      return `<div style="padding:6px 0;border-top:${i ? "1px solid #1c2431" : "none"}">
+        <div><span style="color:#8b98a8">hop ${i + 1}:</span> <span style="color:#79c0ff">${esc(h.query)}</span></div>
+        <div style="font-size:11px;padding-left:38px">${mark}</div>
+      </div>`;
+    }).join("");
+    trace = `<details style="margin-top:12px;border-top:1px solid #222a35;padding-top:10px">
+      <summary style="cursor:pointer;color:#8b98a8;font-size:12px">retrieval trajectory · ${d.hops.length} hops (the agent re-queried until the evidence was strong enough)</summary>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:8px">${rows}</div>
+    </details>`;
+  }
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;line-height:1.7;max-width:760px">
     <div class="row" style="margin:0 0 10px">${policy} ${faith}</div>
     <div style="color:#e6edf3">${body}</div>
+    ${trace}
   </div>`;
 }
 
