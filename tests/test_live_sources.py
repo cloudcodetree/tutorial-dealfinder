@@ -71,3 +71,31 @@ def test_ebay_oauth_then_browse_search(monkeypatch):
     out = EbaySource().search("laptop")
     assert len(out) == 1
     assert out[0].price == 659.99 and out[0].source == "eBay:New"
+
+
+@respx.mock
+def test_amazon_maps_apify_actor_response(monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "t")
+    from dealfinder.live_sources import AmazonSource
+    # The junglee/Amazon-crawler actor returns a JSON list; price is a {value,currency} object.
+    respx.post(url__regex=r"https://api\.apify\.com/v2/acts/junglee~Amazon-crawler/.*").mock(
+        return_value=httpx.Response(200, json=[
+            {"title": "Soundcore by Anker Q20i Hybrid Active Noise Cancelling Headphones",
+             "price": {"value": 39.98, "currency": "$"}, "asin": "B0CQXMXJC5", "imageUrl": "http://img/1.jpg"},
+            {"title": "Euro-priced item", "price": {"value": 30.0, "currency": "€"}, "asin": "X"},  # dropped: not USD
+            {"title": "No price row", "asin": "Y"},                                                 # dropped: no price
+        ]))
+    out = AmazonSource().search("noise cancelling headphones", limit=5)
+    assert len(out) == 1                                   # euro + no-price rows filtered out
+    p = out[0]
+    assert p.price == 39.98 and p.currency == "USD"
+    assert p.source == "Amazon" and p.brand == "Amazon"
+    assert p.url == "https://www.amazon.com/dp/B0CQXMXJC5"  # URL built from ASIN
+    assert p.id == "amazon-B0CQXMXJC5"
+
+
+def test_amazon_off_without_token(monkeypatch):
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+    from dealfinder.live_sources import AmazonSource
+    assert AmazonSource().available() is False
+    assert AmazonSource().search("headphones") == []

@@ -18,7 +18,7 @@ import base64
 import os
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import httpx
 
@@ -128,6 +128,60 @@ class ApifySource:
                 currency=it.get("currency") or "USD",
                 url=it.get("productUrl") or "",
                 source=f"{self.name}:{merchant}", image_url=it.get("imageUrl"),
+            ))
+        return out
+
+
+class AmazonSource:
+    """Amazon listings via an Apify actor (managed scraping) — the one big retailer
+    the Google-Shopping feeds barely carry. Amazon's own PA-API needs an approved
+    affiliate with qualifying sales, and Amazon blocks direct scraping, so we go
+    through Apify like the eBay-via-Apify workaround in Part 7. Reuses APIFY_TOKEN;
+    the actor takes an Amazon *search URL*, so we build one from the query.
+    """
+
+    name = "Amazon"
+    tier = 2  # managed scraping — costs credits, slower than the tier-1 APIs
+    _actor = "junglee~Amazon-crawler"
+
+    def available(self) -> bool:
+        return bool(os.getenv("APIFY_TOKEN"))
+
+    def search(self, query: str, limit: int = 15) -> list[Product]:
+        token = os.getenv("APIFY_TOKEN")
+        if not token:
+            return []
+        search_url = "https://www.amazon.com/s?k=" + quote_plus(query)
+        r = httpx.post(
+            f"https://api.apify.com/v2/acts/{self._actor}/run-sync-get-dataset-items",
+            params={"token": token},
+            json={
+                "categoryOrProductUrls": [{"url": search_url}],
+                "maxItemsPerStartUrl": limit,
+                "maxSearchPagesPerStartUrl": 1,
+                "scrapeProductDetails": False,
+                "countryCode": "US",
+            },
+            timeout=180,
+        )
+        out = []
+        for it in (r.json() if isinstance(r.json(), list) else []):
+            price_obj = it.get("price") or {}
+            price = _f(price_obj.get("value") if isinstance(price_obj, dict) else price_obj)
+            if not price:
+                continue
+            # The actor returns no product URL, but the ASIN yields a canonical one.
+            asin = it.get("asin")
+            currency = (price_obj.get("currency") if isinstance(price_obj, dict) else None) or "USD"
+            if currency not in ("USD", "$"):
+                continue  # keep the US-dollar assumption downstream sources rely on
+            out.append(Product(
+                id=f"amazon-{asin or str(it.get('title',''))[:40]}",
+                title=(it.get("title") or query)[:120],
+                brand="Amazon", category="product", price=round(price, 2), currency="USD",
+                url=f"https://www.amazon.com/dp/{asin}" if asin else "",
+                source=f"{self.name}",
+                image_url=it.get("imageUrl"),
             ))
         return out
 
@@ -342,5 +396,5 @@ class FirecrawlSource:
         return out
 
 
-LIVE_SOURCES = [EbaySource(), RapidApiSource(), BestBuySource(), ApifySource(),
-                ShopifySource(), FirecrawlSource(), ItunesSource()]
+LIVE_SOURCES = [EbaySource(), RapidApiSource(), BestBuySource(), AmazonSource(),
+                ApifySource(), ShopifySource(), FirecrawlSource(), ItunesSource()]
