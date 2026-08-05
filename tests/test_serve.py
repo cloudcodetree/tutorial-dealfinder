@@ -48,3 +48,21 @@ def test_semantic_offline_fallback_returns_verdicts():
     bose = next((v for v in body["results"] if "QuietComfort 45" in v["title"]), None)
     if bose:
         assert bose["verdict"] == "suspicious"
+
+
+def test_context_window_packs_orders_and_evicts():
+    # Part 16 surface: retrieve wide, pack to a budget, evict the tail, and place
+    # the survivors at the edges. Real bge token math, fully offline.
+    r = client.get("/context", params={"q": "noise cancelling headphones under $150",
+                                        "budget": 256, "k": 20})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["retrieved"] == 20
+    assert b["block_tokens"] > b["budget"]         # k=20 does NOT fit
+    assert b["packed_tokens"] <= b["budget"]       # what we send fits
+    assert b["kept"] + b["evicted"] == 20
+    assert b["evicted"] > 0                         # tail was dropped
+    assert b["system_prompt_tokens"] == 62          # the real DealFinder system prompt
+    # Survivors carry an edge/middle position; the strongest bracket the block.
+    positions = [it["pos"] for it in b["included"]]
+    assert positions[0] == "start" and positions[-1] == "end"

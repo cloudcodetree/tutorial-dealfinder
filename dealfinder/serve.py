@@ -202,6 +202,51 @@ def ask_agentic(q: str, max_hops: int = 3):
     }
 
 
+@app.get("/context")
+def context_window(q: str, budget: int = 256, k: int = 20):
+    """Context engineering (Part 16): make the window's packing *visible*.
+
+    Retrieve wide (k), then pack the ranked deals into a token `budget` and reorder
+    the survivors so the strongest sit at the edges ("lost in the middle"). Returns
+    the real bge token math — the full retrieved block cost, the packed cost, what
+    was kept vs evicted, and each survivor's position — so the "context as RAM"
+    move is inspectable in the browser, not just asserted. Fully offline."""
+    from . import context as ctx
+    from . import rag as _rag
+
+    # Pin to the reproducible snapshot path: the token math this surface teaches
+    # must not vary with how much has been seeded into pgvector.
+    items = _rag.retrieve(q, k=k, use_db=False)
+    block_tokens = sum(ctx.count_tokens(_rag.build_context([it])) for it in items)
+    packed = ctx.pack_deals(items, budget_tokens=budget)
+    ordered = ctx.lost_in_the_middle(packed.included)
+
+    def _pos(i: int, n: int) -> str:
+        return "start" if i == 0 else "end" if i == n - 1 else "middle"
+
+    n = len(ordered)
+    return {
+        "query": q,
+        "budget": budget,
+        "retrieved": len(items),
+        "block_tokens": block_tokens,          # full k-block cost (does NOT fit)
+        "packed_tokens": packed.tokens,        # what actually goes in the window
+        "system_prompt_tokens": ctx.count_tokens(_rag._SYSTEM),
+        "kept": len(packed.included),
+        "evicted": len(packed.dropped),
+        "included": [
+            {"id": it.id, "title": it.title, "price": it.price, "source": it.source,
+             "verdict": it.verdict, "pos": _pos(i, n)}
+            for i, it in enumerate(ordered)
+        ],
+        "dropped": [
+            {"id": it.id, "title": it.title, "price": it.price,
+             "source": it.source, "verdict": it.verdict}
+            for it in packed.dropped
+        ],
+    }
+
+
 @app.get("/sources")
 def sources():
     """Which live sources are configured right now."""

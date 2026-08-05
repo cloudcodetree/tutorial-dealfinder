@@ -107,6 +107,7 @@ def retrieve(
     k: int = 5,
     products: list[Product] | None = None,
     embeddings=None,
+    use_db: bool | None = None,
 ) -> list[RetrievedItem]:
     """Retrieve the top-k real listings for ``query`` with their deal signal.
 
@@ -117,7 +118,11 @@ def retrieve(
     similarity, price, and the two-signal verdict, so an answer can ground on it.
 
     Deterministic against the frozen snapshot: same corpus + same cached
-    embeddings ⇒ same top-k.
+    embeddings ⇒ same top-k. ``use_db`` overrides where vectors come from: leave
+    it ``None`` to follow ``DATABASE_URL`` (the default), or pass ``False`` to force
+    the reproducible in-memory snapshot path regardless of env — used by the
+    context-engineering surface (Part 16) so its token math never depends on how
+    much has been seeded into pgvector.
     """
     if products is None:
         products, embeddings = load_catalog_embeddings()
@@ -127,7 +132,8 @@ def retrieve(
     medians = _load_medians()
     models = _category_models(products)
 
-    if os.getenv("DATABASE_URL"):
+    from_db = bool(os.getenv("DATABASE_URL")) if use_db is None else use_db
+    if from_db:
         ranked = _retrieve_pgvector(query, products, k)
     else:
         # Hybrid semantic+BM25 → RRF → value rerank over the cached embeddings.
