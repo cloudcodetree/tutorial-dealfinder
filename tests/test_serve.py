@@ -66,3 +66,17 @@ def test_context_window_packs_orders_and_evicts():
     # Survivors carry an edge/middle position; the strongest bracket the block.
     positions = [it["pos"] for it in b["included"]]
     assert positions[0] == "start" and positions[-1] == "end"
+
+
+def test_review_endpoint_catches_the_trap_and_revises():
+    # Part 17 surface: the trap-writer draft is rejected and revised to a grounded
+    # answer that leads with the real Anker DEAL.
+    r = client.get("/review", params={"q": "noise cancelling headphones under $150", "trap": "true"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["draft_review"]["approved"] is False          # trap draft rejected
+    assert b["draft_review"]["checks"]["lead_is_a_deal"] is False
+    assert any("SUSPICIOUS" in i for i in b["draft_review"]["issues"])
+    assert b["revised"] is True                             # orchestrator revised
+    assert b["final_review"]["approved"] is True            # revision passes review
+    assert "Anker Soundcore Q20i" in b["final"] and "$44.99" in b["final"]

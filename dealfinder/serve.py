@@ -202,6 +202,56 @@ def ask_agentic(q: str, max_hops: int = 3):
     }
 
 
+class _TrapWriter:
+    """A demo writer fooled by a too-good-to-be-true price — recommends the $46
+    Bose QC45 trap as 'best value'. Used only by /review?trap=true to make the
+    reviewer's catch visible; production writers are real LLMs."""
+
+    def available(self) -> bool:
+        return True
+
+    def chat(self, messages, temperature: float = 0) -> str:
+        return ("Best value: Bose QuietComfort 45 Wireless Noise Cancelling "
+                "Headphones at $46.00 — an incredible deal.")
+
+
+@app.get("/review")
+def review_multiagent(q: str, k: int = 5, trap: bool = False):
+    """Multi-agent writer/reviewer (Part 17): make the second opinion visible.
+
+    A writer drafts a recommendation; an isolated reviewer re-retrieves the evidence
+    and adversarially checks it (grounded? lead a real DEAL? trap warned?). If the
+    draft is rejected, the orchestrator revises to the guaranteed-grounded
+    deterministic answer. Pass ``trap=true`` to inject a writer fooled by the $46
+    Bose trap and watch the reviewer catch it. Fully offline."""
+    from . import orchestrate as orch
+    from . import rag as _rag
+
+    # Pin retrieval to the reproducible snapshot (orchestrate's contract) so the
+    # writer/reviewer trail is stable regardless of any attached DATABASE_URL.
+    writer = _TrapWriter() if trap else None
+    draft = orch.recommend(q, k=k, llm=writer)
+    draft_review = orch.review(q, draft, k=k)
+    if draft_review.approved:
+        final, revised, final_review = draft.answer, False, draft_review
+    else:
+        fixed = _rag.deterministic_answer(q, k=k, use_db=False)
+        final_review = orch.review(q, fixed, k=k)
+        final, revised = fixed.answer, True
+
+    def _rv(r):
+        return {"approved": r.approved, "issues": r.issues, "checks": r.checks}
+
+    return {
+        "query": q,
+        "draft": {"answer": draft.answer, "used_llm": draft.used_llm},
+        "draft_review": _rv(draft_review),
+        "revised": revised,
+        "final": final,
+        "final_review": _rv(final_review),
+    }
+
+
 @app.get("/context")
 def context_window(q: str, budget: int = 256, k: int = 20):
     """Context engineering (Part 16): make the window's packing *visible*.

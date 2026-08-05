@@ -349,16 +349,17 @@ def _title_cited(it: RetrievedItem, text: str) -> bool:
     return (head and head in ans) or (f"{it.price:.2f}" in _prices_in(text))
 
 
-def answer(query: str, k: int = 5, *, llm=None) -> RagAnswer:
+def answer(query: str, k: int = 5, *, llm=None, use_db: bool | None = None) -> RagAnswer:
     """Retrieve → build context → GENERATE a grounded answer.
 
     If an LLM client is available (injected ``llm`` or a configured OpenRouter key
     via ``llm.available()``), it answers from the numbered context under a strict
     grounded prompt. Otherwise a deterministic extractive synthesis is built from
     the retrieved rows. Either way, ``grounded`` reflects the faithfulness check
-    and ``sources`` are the retrieved ids the answer references.
+    and ``sources`` are the retrieved ids the answer references. ``use_db`` forwards
+    to ``retrieve`` (``False`` pins the reproducible snapshot path).
     """
-    items = retrieve(query, k=k)
+    items = retrieve(query, k=k, use_db=use_db)
     client = llm if llm is not None else _llm_module
     if getattr(client, "available", lambda: False)():
         try:
@@ -367,6 +368,17 @@ def answer(query: str, k: int = 5, *, llm=None) -> RagAnswer:
             # Any LLM failure degrades to the deterministic, always-grounded path.
             return _deterministic_answer(query, items)
     return _deterministic_answer(query, items)
+
+
+def deterministic_answer(query: str, k: int = 5, *, use_db: bool | None = None) -> RagAnswer:
+    """The extractive, LLM-free answer path — no matter what key is configured.
+
+    Always grounded, always leads with the top DEAL and warns about any SUSPICIOUS
+    trap, in a fixed 'Best value: … at $…' shape. Used as the multi-agent
+    orchestrator's revision fallback (Part 17): when a writer's draft is rejected,
+    this is the reliable answer we fall back to — a *guarantee*, not another LLM
+    roll of the dice. ``use_db`` forwards to ``retrieve``."""
+    return _deterministic_answer(query, retrieve(query, k=k, use_db=use_db))
 
 
 # ---------------------------------------------------------------------------

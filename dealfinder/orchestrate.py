@@ -47,16 +47,34 @@ class Orchestrated:
     used_llm: bool
 
 
+# Both agents retrieve over the frozen snapshot (this module's contract), so the
+# writer/reviewer trail is reproducible regardless of any attached DATABASE_URL.
+_SNAPSHOT = False
+
+
 def recommend(query: str, k: int = 5, *, llm=None) -> rag.RagAnswer:
     """Writer: retrieve + generate a grounded recommendation (Part 14 pipeline)."""
-    return rag.answer(query, k=k, llm=llm)
+    return rag.answer(query, k=k, llm=llm, use_db=_SNAPSHOT)
 
 
 def _lead_title(answer_text: str) -> str:
-    """The product named as the lead pick — the text after 'Best value:'/'Best pick:'
-    up to ' at $'. '' if the answer has no lead."""
-    m = re.search(r"Best (?:value|pick):\s*(.+?)\s+at\s+\$", answer_text)
-    return m.group(1).strip() if m else ""
+    """The product named as the lead pick — the title right after the 'Best value'/
+    'Best pick' cue, up to the price. '' if the answer has no identifiable lead.
+
+    Robust to both answer shapes the writers produce: the deterministic template
+    ('Best value: <title> at $44.99') AND a real LLM's markdown ('**Best pick**\\n-
+    *<title> — $44.99*'). Without this the reviewer can't locate the lead in any
+    LLM-written draft and would reject every one of them."""
+    # Strip markdown emphasis so '**Best pick**' and '*Title*' match cleanly.
+    text = re.sub(r"[*_`#]+", "", answer_text)
+    # 'Best value'/'Best pick', then any colon / newline / list-bullet, then the
+    # title, up to the first price delimiter ('at $', a dash before '$', '($', '$').
+    m = re.search(
+        r"Best\s+(?:value|pick)\s*[:.\-]?\s*\n?\s*[-*•]?\s*"
+        r"(.+?)\s*(?:\bat\s+\$|[-–—]\s*\$|\(\$|\$)",
+        text, re.IGNORECASE,
+    )
+    return m.group(1).strip(" -–—:*") if m else ""
 
 
 def _norm(s: str) -> str:
@@ -75,7 +93,7 @@ def review(query: str, answer: rag.RagAnswer, k: int = 5) -> Review:
     3. **trap-warned** — if a SUSPICIOUS trap was retrieved, the answer must flag it
        (say "avoid"/"SUSPICIOUS"), not stay silent.
     """
-    items = rag.retrieve(query, k=k)
+    items = rag.retrieve(query, k=k, use_db=_SNAPSHOT)
     by_title = {_norm(it.title): it for it in items}
     checks: dict[str, bool] = {}
     issues: list[str] = []
@@ -119,7 +137,10 @@ def orchestrate(query: str, k: int = 5, *, recommender_llm=None) -> Orchestrated
     if r.approved:
         return Orchestrated(draft.answer, True, r, revised=False, used_llm=draft.used_llm)
 
-    # Revise: the deterministic path is grounded and leads with the top DEAL.
-    fixed = rag.answer(query, k=k)  # no llm ⇒ deterministic
+    # Revise: fall back to the LLM-free deterministic answer — it is *guaranteed*
+    # grounded and leads with the top DEAL, regardless of any configured key. (Note
+    # `rag.answer(query, k=k)` would NOT do this once an OpenRouter key is set: it
+    # would use the LLM and could reproduce the same class of mistake.)
+    fixed = rag.deterministic_answer(query, k=k, use_db=_SNAPSHOT)
     r2 = review(query, fixed, k=k)
     return Orchestrated(fixed.answer, r2.approved, r2, revised=True, used_llm=False)
