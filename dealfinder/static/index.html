@@ -258,23 +258,43 @@ async function run(q) {
       $("go").disabled = false;
       return;
     }
-    const r = await fetch((m === "meaning" ? "/semantic?q=" : "/search?q=") + encodeURIComponent(q));
-    if (r.status === 503) { $("meta").textContent = "meaning search needs a database (set DATABASE_URL)"; $("go").disabled = false; return; }
-    const d = await r.json();
     if (m === "meaning") {
+      const r = await fetch("/semantic?q=" + encodeURIComponent(q));
+      if (r.status === 503) { $("meta").textContent = "meaning search needs a database (set DATABASE_URL)"; $("go").disabled = false; return; }
+      const d = await r.json();
       const scope = d.backend === "pgvector" ? "across all saved deals" : "across the frozen snapshot";
       $("meta").textContent = `${d.count} matches by meaning · ${scope}`;
-    } else {
-      const live = (d.sources_live || []).join(", ") || "none";
-      $("meta").textContent = `${d.count} offers · sources live: ${live} · median ${fmt(d.median_price)}`;
+      $("grid").innerHTML = d.results.length ? d.results.map(card).join("") : `<div class="empty">No results.</div>`;
+      $("go").disabled = false;
+      return;
     }
-    $("grid").innerHTML = d.results.length
-      ? d.results.map(card).join("")
-      : `<div class="empty">No results.</div>`;
+    // live: stream offers over Server-Sent Events — cards paint as each source lands,
+    // instead of blocking until the slowest one finishes (Part 18).
+    let n = 0; const srcs = [];
+    const es = new EventSource("/search/stream?q=" + encodeURIComponent(q));
+    es.addEventListener("results", (e) => {
+      const d = JSON.parse(e.data);
+      if (d.source && !srcs.includes(d.source)) srcs.push(d.source);
+      (d.results || []).forEach(p => { $("grid").insertAdjacentHTML("beforeend", card(p)); n++; });
+      $("meta").textContent = `streaming… ${n} offers · sources: ${srcs.join(", ")}`;
+    });
+    es.addEventListener("source_error", (e) => {
+      const d = JSON.parse(e.data); if (d.source && !srcs.includes(d.source)) srcs.push(d.source + "✗");
+    });
+    es.addEventListener("done", (e) => {
+      const d = JSON.parse(e.data);
+      $("meta").textContent = `${n} offers streamed · sources: ${srcs.join(", ") || "none"} · median ${fmt(d.median_price)}`;
+      if (!n) $("grid").innerHTML = `<div class="empty">No results.</div>`;
+      es.close(); $("go").disabled = false;
+    });
+    // EventSource fires 'error' when the server closes the stream after 'done';
+    // closing here prevents the browser's automatic reconnect (which would re-search).
+    es.addEventListener("error", () => { es.close(); $("go").disabled = false; });
+    return;
   } catch (e) {
     $("meta").textContent = "search failed: " + e;
+    $("go").disabled = false;
   }
-  $("go").disabled = false;
 }
 
 fetch("/sources").then(r=>r.json()).then(s => {

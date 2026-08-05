@@ -99,3 +99,27 @@ def verdict(
     if m < 0:
         return Verdict("overpriced", m, fair, rf, f"{-m * 100:.0f}% above the market median.")
     return Verdict("fair", m, fair, rf, "priced near the market median.")
+
+
+def render_badge(deal_pct: float, residual_frac: float) -> str:
+    """Map the two-signal score to a single display badge label.
+
+    A thin presentation-layer wrapper over the same signals + thresholds that
+    ``verdict`` uses, returning the uppercase badge the web UI paints on a card:
+
+    - ``deal_pct``      — fraction below the same-query cross-source median
+      (positive = cheaper than the market).
+    - ``residual_frac`` — ``(fair - actual) / fair`` (positive = below model fair).
+
+    Returns one of ``"DEAL" | "FAIR" | "SUSPICIOUS" | "OVERPRICED"``. The suspicious
+    guard is checked first: it is the case where BOTH signals would otherwise shout
+    "great deal", so it overrides rather than falls through (the Bose-QC45-at-$46
+    trap). Kept consistent with ``verdict`` by sharing ``DEAL_MEDIAN_FRAC`` and
+    ``SUSPICIOUS_RESIDUAL_FRAC``."""
+    if deal_pct >= DEAL_MEDIAN_FRAC and residual_frac >= SUSPICIOUS_RESIDUAL_FRAC:
+        return "SUSPICIOUS"
+    if deal_pct >= DEAL_MEDIAN_FRAC:
+        return "DEAL"
+    if deal_pct < 0:
+        return "OVERPRICED"
+    return "FAIR"

@@ -22,7 +22,7 @@ from .dealscore import fair_price
 from .features import featurize
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
-from .rag import _category_models
+from .rag import _category_models, _load_medians
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
@@ -52,6 +52,8 @@ _fair = {
     if p.category in _cat_models else float(p.price)
     for p in _catalog
 }
+# Per-item same-query capture median (for the median signal in /deal badges).
+_medians = _load_medians()
 
 
 @app.get("/healthz")
@@ -106,7 +108,8 @@ def _stream_search(query: str, sources):
             k = dedup_key(p)
             if k not in seen or p.price < seen[k].price:
                 seen[k] = p
-            batch.append({"id": p.id, "title": p.title, "price": p.price, "source": p.source})
+            batch.append({"id": p.id, "title": p.title, "price": p.price,
+                          "source": p.source, "url": p.url, "image_url": p.image_url})
         yield _sse("results", {"source": getattr(src, "name", "?"), "results": batch})
 
     items = list(seen.values())
@@ -322,8 +325,15 @@ def deal(product_id: str):
     if product_id not in _idx:
         raise HTTPException(status_code=404, detail="unknown product")
     p = _catalog[_idx[product_id]]
+    fair = _fair[p.id]
+    from .dealscore import median_signal, residual_fraction, render_badge
+    m = median_signal(p.price, _medians.get(p.id, 0.0))
+    rf = residual_fraction(p.price, fair)
     return {
         "id": p.id, "title": p.title, "price": p.price,
-        "fair": round(_fair[p.id], 2),
-        "deal_score": round(deal_score(p.price, _fair[p.id]), 3),
+        "fair": round(fair, 2),
+        "deal_score": round(deal_score(p.price, fair), 3),
+        "deal_pct": round(m, 3),
+        "residual_frac": round(rf, 3),
+        "badge": render_badge(m, rf),   # Part 18: the two-signal verdict as a UI badge
     }

@@ -78,3 +78,14 @@ def test_trap_and_honest_deal_are_separated_by_the_residual(audio_model_and_prod
     rf_bose = residual_fraction(bose.price, fair_price(model, featurize(bose)))
     # Bose (flagship) is much further below its fair price than the Anker (budget).
     assert rf_bose > rf_anker
+
+
+@pytest.mark.parametrize("deal_pct,residual_frac,expected", [
+    (0.724, 0.585, "DEAL"),         # Anker Q20i: 72% under median, plausible residual
+    (0.000, 0.428, "FAIR"),         # priced at the same-query median → nothing special
+    (0.718, 0.839, "SUSPICIOUS"),   # Bose QC45 $46: 72% under, but far below model fair
+    (-1.454, -0.403, "OVERPRICED"), # Sony XM6 $399.99: well above the median
+])
+def test_render_badge_maps_the_two_signals(deal_pct, residual_frac, expected):
+    from dealfinder.dealscore import render_badge
+    assert render_badge(deal_pct, residual_frac) == expected
