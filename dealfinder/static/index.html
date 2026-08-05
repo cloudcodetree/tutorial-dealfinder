@@ -174,9 +174,12 @@ async function run(q) {
 }
 
 fetch("/sources").then(r=>r.json()).then(s => {
-  const off = Object.entries(s).filter(([,v])=>!v).map(([k])=>k);
-  if (off.length) $("note").innerHTML =
-    `Live now via keyless sources. To add real retail deals, set <code>RAPIDAPI_KEY</code> or <code>APIFY_TOKEN</code> and restart — currently off: ${esc(off.join(", "))}.`;
+  const on = Object.entries(s).filter(([,v])=>v).map(([k])=>k);
+  const paid = ["Amazon", "Apify", "Firecrawl"];  // metered — off unless opted in
+  $("note").innerHTML =
+    `Running free-tier sources: <b>${esc(on.join(", ") || "none")}</b>. ` +
+    `Metered sources (${paid.join(", ")}) are off by design — set ` +
+    `<code>DEALFINDER_ENABLE_PAID_SOURCES=1</code> to opt in (they cost credits).`;
 });
 
 $("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) run(q); });

@@ -32,6 +32,17 @@ def _f(v) -> float | None:
         return None
 
 
+def _paid_ok() -> bool:
+    """Metered sources (Apify actors, Firecrawl) only run when explicitly opted in.
+
+    Amazon has no free data path, and the Apify Google-Shopping/eBay actors are
+    pay-per-event, so by default DealFinder runs on the free stack only (eBay
+    Browse API, RapidAPI free tier, BestBuy, Shopify, iTunes) and never touches a
+    metered service. Set DEALFINDER_ENABLE_PAID_SOURCES=1 to turn the paid ones on.
+    """
+    return os.getenv("DEALFINDER_ENABLE_PAID_SOURCES") == "1"
+
+
 class ItunesSource:
     name = "iTunes"
     # Media catalog — only a keyless fallback when no real retail source is set.
@@ -94,9 +105,10 @@ class RapidApiSource:
 class ApifySource:
     name = "Apify"
     tier = 2  # structured but costs credits / slower
+    metered = True  # the Apify Google-Shopping actor is pay-per-event
 
     def available(self) -> bool:
-        return bool(os.getenv("APIFY_TOKEN"))
+        return bool(os.getenv("APIFY_TOKEN")) and _paid_ok()
 
     def search(self, query: str, limit: int = 15) -> list[Product]:
         token = os.getenv("APIFY_TOKEN")
@@ -142,10 +154,11 @@ class AmazonSource:
 
     name = "Amazon"
     tier = 2  # managed scraping — costs credits, slower than the tier-1 APIs
+    metered = True  # junglee actor: 14-day trial then $40+/mo (no free Amazon path)
     _actor = "junglee~Amazon-crawler"
 
     def available(self) -> bool:
-        return bool(os.getenv("APIFY_TOKEN"))
+        return bool(os.getenv("APIFY_TOKEN")) and _paid_ok()
 
     def search(self, query: str, limit: int = 15) -> list[Product]:
         token = os.getenv("APIFY_TOKEN")
@@ -361,13 +374,14 @@ class FirecrawlSource:
 
     name = "Firecrawl"
     tier = 3  # broad-web, rate-limited — escalate to only if needed
+    metered = True  # free credits then paid
     # editorial / review domains that quote prices but aren't a place to buy
     _SKIP = {"rtings.com", "nytimes.com", "techradar.com", "cnet.com", "tomsguide.com",
              "wired.com", "theverge.com", "pcmag.com", "forbes.com", "reddit.com",
              "youtube.com", "wikipedia.org", "wirecutter.com", "businessinsider.com"}
 
     def available(self) -> bool:
-        return bool(os.getenv("FIRECRAWL_API_KEY"))
+        return bool(os.getenv("FIRECRAWL_API_KEY")) and _paid_ok()
 
     def search(self, query: str, limit: int = 10) -> list[Product]:
         key = os.getenv("FIRECRAWL_API_KEY")
