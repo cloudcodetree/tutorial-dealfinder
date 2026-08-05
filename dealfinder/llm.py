@@ -1,9 +1,12 @@
 """OpenRouter LLM client with a model tier + graceful degradation.
 
-Same anti-throttle idea as the sources: try a cheap primary model, fall through
-to fallbacks on rate-limit/unavailability (429/402/403/404), and let callers
+Same anti-throttle idea as the sources: try a primary model, fall through to
+fallbacks on rate-limit/unavailability (429/402/403/404), and let callers
 degrade to a deterministic path if every model is unreachable. Configure the
-tier with OPENROUTER_MODELS (comma-separated); default = cheap paid → free.
+tier with OPENROUTER_MODELS (comma-separated); the default tier is **free-only**
+(every model is an OpenRouter `:free` endpoint) so the app costs nothing to run.
+Point OPENROUTER_MODELS at a paid model if you want higher quality and are
+willing to pay.
 """
 from __future__ import annotations
 
@@ -21,7 +24,13 @@ def models() -> list[str]:
     env = os.getenv("OPENROUTER_MODELS")
     if env:
         return [m.strip() for m in env.split(",") if m.strip()]
-    return ["deepseek/deepseek-chat", "meta-llama/llama-3.3-70b-instruct:free"]
+    # Free-only tier: never bills the user. Ordered strong→resilient; the last
+    # entry, openrouter/free, auto-routes to whatever free model is available.
+    return [
+        "google/gemma-4-31b-it:free",
+        "openai/gpt-oss-20b:free",
+        "openrouter/free",
+    ]
 
 
 def available() -> bool:
