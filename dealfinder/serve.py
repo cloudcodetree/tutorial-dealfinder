@@ -300,6 +300,41 @@ def context_window(q: str, budget: int = 256, k: int = 20):
     }
 
 
+@app.get("/dataset")
+def dataset_report():
+    """Dataset engineering (Part 19): make the labeled training set inspectable.
+
+    Builds the labeled dataset from the frozen snapshot and returns its real shape —
+    the label distribution, the class imbalance + balanced class weights, and the
+    leakage-safe grouped split (whole queries to one side). Query-independent: the
+    training set is fixed. Deterministic and offline."""
+    from . import dataset as ds_mod
+
+    ds = ds_mod.build_labeled_dataset()
+    summary = ds_mod.imbalance_summary(ds)
+    tr, te = ds_mod.grouped_split(ds.queries, test_frac=0.25, seed=0)
+    train_q = sorted({ds.queries[i] for i in tr})
+    test_q = sorted({ds.queries[i] for i in te})
+    return {
+        "n_rows": int(ds.y.shape[0]),
+        "n_features": int(ds.X.shape[1]),
+        "feature_names": ds.feature_names,
+        "n_queries": len(set(ds.queries)),
+        "counts": summary["counts"],
+        "fractions": summary["fractions"],
+        "majority_class": summary["majority_class"],
+        "majority_fraction": summary["majority_fraction"],
+        "class_weights": summary["class_weights"],
+        "strategy": summary["strategy"],
+        "split": {
+            "seed": 0, "test_frac": 0.25,
+            "train_rows": len(tr), "test_rows": len(te),
+            "train_queries": train_q, "test_queries": test_q,
+            "disjoint": set(train_q).isdisjoint(test_q),
+        },
+    }
+
+
 @app.get("/sources")
 def sources():
     """Which live sources are configured right now."""

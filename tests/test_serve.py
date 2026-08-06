@@ -80,3 +80,17 @@ def test_review_endpoint_catches_the_trap_and_revises():
     assert b["revised"] is True                             # orchestrator revised
     assert b["final_review"]["approved"] is True            # revision passes review
     assert "Anker Soundcore Q20i" in b["final"] and "$44.99" in b["final"]
+
+
+def test_dataset_endpoint_reports_labels_split_and_weights():
+    # Part 19 surface: the labeled training set's real shape, exposed for inspection.
+    r = client.get("/dataset")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["n_rows"] == 270 and b["n_queries"] == 18
+    assert b["counts"] == {"deal": 71, "fair": 40, "suspicious": 32, "overpriced": 127}
+    assert b["majority_class"] == "overpriced" and b["majority_fraction"] == 0.4704
+    assert b["class_weights"]["suspicious"] == 2.1094      # rarest → largest weight
+    assert b["split"]["train_rows"] == 210 and b["split"]["test_rows"] == 60
+    assert len(b["split"]["train_queries"]) == 14 and len(b["split"]["test_queries"]) == 4
+    assert b["split"]["disjoint"] is True                  # no query straddles the split

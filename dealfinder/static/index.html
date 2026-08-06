@@ -51,6 +51,7 @@
       <label><input type="radio" name="mode" value="ask"> ask (agent)</label>
       <label><input type="radio" name="mode" value="window"> window (context)</label>
       <label><input type="radio" name="mode" value="review"> review (multi-agent)</label>
+      <label><input type="radio" name="mode" value="dataset"> dataset (ML)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -221,6 +222,48 @@ function reviewPanel(d) {
   return html;
 }
 
+// Render the labeled training set (Part 19): label distribution, class imbalance +
+// balanced weights, and the leakage-safe grouped split. Query-independent — the
+// training set is fixed; this is the ML inspector, not a search.
+function datasetPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const COLOR = { deal:"#3fb950", fair:"#58a6ff", suspicious:"#f0a30a", overpriced:"#8b98a8" };
+  const max = Math.max(...Object.values(d.counts));
+  const bar = (lab) => {
+    const c = d.counts[lab], pct = Math.round((d.fractions[lab]) * 1000) / 10, w = d.class_weights[lab];
+    const rarest = lab === "suspicious";
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+      <span style="width:92px;color:${COLOR[lab]};font-weight:600">${esc(lab)}</span>
+      <div style="flex:1;background:#0b0f14;border-radius:5px;overflow:hidden;height:20px;border:1px solid var(--line)">
+        <div style="height:100%;width:${(c/max*100).toFixed(0)}%;background:${COLOR[lab]}55;border-right:2px solid ${COLOR[lab]}"></div>
+      </div>
+      <span style="width:120px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12px">${esc(c)} · ${esc(pct)}%</span>
+      <span style="width:150px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:${rarest ? "#f0a30a" : "var(--mut)"}">weight ${esc(w)}${rarest ? " ← largest" : ""}</span>
+    </div>`;
+  };
+  const split = d.split;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:860px">
+    <div class="row" style="margin:0 0 12px;gap:8px">
+      ${chip("#58a6ff", `${d.n_rows} labeled rows`)}
+      ${chip("#8b98a8", `${d.n_queries} queries`)}
+      ${chip("#8b98a8", `${d.n_features} features`)}
+      ${chip("#f0a30a", `majority ${d.majority_class} ${Math.round(d.majority_fraction*1000)/10}%`)}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label distribution · balanced class weights (n / n_classes·count)</div>
+    ${["deal","fair","suspicious","overpriced"].map(bar).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:8px">A classifier that always shouts <b style="color:#e6edf3">${esc(d.majority_class)}</b> scores ${Math.round(d.majority_fraction*1000)/10}% for free — that's the baseline to beat. The rarest class (suspicious) gets the largest weight so the model can't ignore it. No resampling.</div>
+    <div style="border-top:1px solid #222a35;margin-top:14px;padding-top:12px">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Leakage-safe grouped split (seed 0) · whole queries to one side</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px">
+        ${chip("#3fb950", `train: ${split.train_queries.length} queries · ${split.train_rows} rows`)}
+        ${chip("#58a6ff", `test: ${split.test_queries.length} queries · ${split.test_rows} rows`)}
+        ${chip(split.disjoint ? "#3fb950" : "#f0a30a", split.disjoint ? "✓ disjoint — no query straddles the split" : "✗ leak")}
+      </div>
+      <div style="font-size:11px;color:var(--mut);margin-top:8px">test queries: ${split.test_queries.map(esc).join(" · ")}</div>
+    </div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -228,8 +271,17 @@ async function run(q) {
     : m === "ask" ? "the agent is reasoning — filter, then score by deal quality…"
     : m === "window" ? "packing the context window — retrieve wide, then evict to budget…"
     : m === "review" ? "writer drafts, reviewer adversarially checks, orchestrator revises if rejected…"
+    : m === "dataset" ? "building the labeled training set from the frozen snapshot…"
     : "searching live sources…";
   try {
+    if (m === "dataset") {
+      const r = await fetch("/dataset");
+      const d = await r.json();
+      $("meta").textContent = `${d.n_rows} rows · ${d.n_queries} queries · grouped split ${d.split.train_queries.length}/${d.split.test_queries.length} queries (${d.split.train_rows}/${d.split.test_rows} rows)`;
+      $("grid").innerHTML = datasetPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "review") {
       const r = await fetch("/review?q=" + encodeURIComponent(q) + "&trap=" + ($("trap").checked ? "true" : "false"));
       const d = await r.json();
@@ -310,7 +362,8 @@ fetch("/sources").then(r=>r.json()).then(s => {
 document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) run(q); });
+// dataset (ML) mode is query-independent — run it on submit even with an empty box.
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || mode() === "dataset") run(q); });
 </script>
 </body>
 </html>
