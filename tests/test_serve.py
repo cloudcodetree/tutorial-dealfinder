@@ -121,3 +121,20 @@ def test_models_endpoint_reports_the_gbdt_lift():
     assert b["hand_only"]["gbdt_mae"] == 257.99      # boosting alone loses
     assert b["audio"]["gbdt_mae"] == 123.81
     assert b["torch_mlp"]["mae"] == 117.11 and b["torch_mlp"]["real"] is True
+
+
+def test_tracking_endpoint_reports_the_ledger_and_winner():
+    # Part 22 surface: the MLflow run ledger with the registered winner.
+    from dealfinder.tracking import mlflow_available
+    r = client.get("/tracking")
+    assert r.status_code == 200
+    b = r.json()
+    if not b.get("mlflow_available"):
+        import pytest
+        pytest.skip("mlflow not installed")
+    assert b["registered_model"] == "dealfinder-fair-price"
+    assert b["winner"] == "gbdt" and abs(b["winner_mae"] - 138.11) < 0.05
+    runs = {run["name"]: run for run in b["runs"]}
+    assert runs["gbdt"]["selectable"] and runs["gbdt"]["contract"] == "fair-price"
+    assert not runs["torch_baseline"]["selectable"]      # logged, not selectable
+    assert abs(runs["torch_baseline"]["mae"] - 117.11) < 0.05

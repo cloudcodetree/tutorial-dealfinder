@@ -302,6 +302,39 @@ def context_window(q: str, budget: int = 256, k: int = 20):
 
 
 @lru_cache(maxsize=1)
+def _tracking_report() -> dict:
+    """Run the MLflow experiment once and cache — deterministic (seeded)."""
+    from . import tracking
+    if not tracking.mlflow_available():
+        return {"mlflow_available": False}
+    r = tracking.run_tracking()
+    return {
+        "mlflow_available": True,
+        "experiment": r.experiment,
+        "registered_model": r.registered_model,
+        "winner": r.winner,
+        "winner_mae": r.winner_mae,
+        "runs": [
+            {"name": run.name, "mae": run.mae, "r2": run.r2,
+             "contract": run.contract, "selectable": run.selectable}
+            for run in r.runs
+        ],
+    }
+
+
+@app.get("/tracking")
+def tracking_report():
+    """Experiment tracking & registry (Part 22): the run ledger, made visible.
+
+    Runs the five-run MLflow experiment on the fair-price feature contract and
+    returns the ledger: each run's MAE/R², whether it's selectable, and the
+    registered winner. Selectable runs share identical features so the comparison
+    is fair; documented baselines are logged but excluded from selection. Cached
+    (seeded, deterministic); offline SQLite store, no server."""
+    return _tracking_report()
+
+
+@lru_cache(maxsize=1)
 def _models_report() -> dict:
     """Fit the Part 21 models once and cache — deterministic (fixed seeds)."""
     import numpy as np

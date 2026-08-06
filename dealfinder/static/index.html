@@ -54,6 +54,7 @@
       <label><input type="radio" name="mode" value="dataset"> dataset (ML)</label>
       <label><input type="radio" name="mode" value="pipeline"> pipeline (ML)</label>
       <label><input type="radio" name="mode" value="models"> models (ML)</label>
+      <label><input type="radio" name="mode" value="tracking"> tracking (ML)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -328,6 +329,45 @@ function modelsPanel(d) {
   </div>`;
 }
 
+// Render the MLflow experiment ledger (Part 22): every run's MAE/R², selectable vs
+// documented-baseline, and the registered winner marked — the ledger, not just the winner.
+function trackingPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  if (!d.mlflow_available) {
+    return `<div class="card" style="grid-column:1 / -1;padding:18px 22px">MLflow isn't installed in this environment — <code>pip install ".[mlflow]"</code> to run the experiment ledger.</div>`;
+  }
+  const maxMae = Math.max(...d.runs.map(r => r.mae));
+  const row = (r) => {
+    const win = r.name === d.winner;
+    const base = !r.selectable;
+    const color = win ? "#3fb950" : base ? "#8b98a8" : "#58a6ff";
+    return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;${base ? "opacity:.65" : ""}">
+      <span style="width:20px;text-align:center;color:#3fb950;font-weight:700">${win ? "★" : ""}</span>
+      <span style="width:130px;color:${color};font-weight:${win ? "700" : "600"}">${esc(r.name)}</span>
+      <div style="flex:1;background:#0b0f14;border-radius:5px;overflow:hidden;height:18px;border:1px solid var(--line)">
+        <div style="height:100%;width:${(r.mae/maxMae*100).toFixed(0)}%;background:${color}55;border-right:2px solid ${color}"></div>
+      </div>
+      <span style="width:80px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:700">$${esc(r.mae)}</span>
+      <span style="width:64px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut)">R² ${r.r2 != null ? esc(r.r2) : "n/a"}</span>
+      <span style="width:150px;text-align:right">${base ? chip("#8b98a8","documented-baseline") : chip("#58a6ff","fair-price")}</span>
+    </div>`;
+  };
+  // selectable first (the fair comparison), then documented baselines.
+  const ordered = [...d.runs.filter(r=>r.selectable), ...d.runs.filter(r=>!r.selectable)];
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:880px">
+    <div class="row" style="margin:0 0 12px;gap:8px">
+      ${chip("#58a6ff", "experiment: " + esc(d.experiment))}
+      ${chip("#3fb950", "★ winner: " + esc(d.winner) + " $" + esc(d.winner_mae))}
+      ${chip("#8b98a8", "registered: " + esc(d.registered_model))}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Run ledger · lower MAE is better · ★ = registered winner</div>
+    ${ordered.map(row).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">
+      The winner is picked <b style="color:#e6edf3">only</b> from the fair-price runs — all trained on identical hand+emb16 features. The <b style="color:#8b98a8">documented baselines</b> (linear $227.89, torch $117.11) are logged so the Part 21 numbers reproduce, but excluded from selection: torch's $117.11 is lower, but on cheaper hand-only features — not the same experiment. On equal footing, <b style="color:#3fb950">gbdt wins at $${esc(d.winner_mae)}</b>.
+    </div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -338,8 +378,19 @@ async function run(q) {
     : m === "dataset" ? "building the labeled training set from the frozen snapshot…"
     : m === "pipeline" ? "running the 5-stage orchestration flow…"
     : m === "models" ? "fitting linear, GBDT+embeddings, and a PyTorch MLP on the snapshot…"
+    : m === "tracking" ? "running the MLflow experiment — logging five runs, selecting the winner…"
     : "searching live sources…";
   try {
+    if (m === "tracking") {
+      const r = await fetch("/tracking");
+      const d = await r.json();
+      $("meta").textContent = d.mlflow_available
+        ? `${d.runs.length} runs logged · winner ★ ${d.winner} $${d.winner_mae} · registered ${d.registered_model}`
+        : "mlflow not installed";
+      $("grid").innerHTML = trackingPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "models") {
       const r = await fetch("/models");
       const d = await r.json();
@@ -445,7 +496,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
