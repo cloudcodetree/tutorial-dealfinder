@@ -300,6 +300,35 @@ def context_window(q: str, budget: int = 256, k: int = 20):
     }
 
 
+@app.get("/pipeline")
+def pipeline_report():
+    """Pipelines & orchestration (Part 20): run the 5-stage flow and show its trail.
+
+    ingest → normalize → quality-gate → label → good_deals model. Runs the identical
+    stage chain the Prefect flow wraps (FlowResult is the same either path) and
+    returns each stage's outcome: the data-contract gate (rows valid/total, pass),
+    the real label distribution, and the dbt-style good_deals count. Deterministic,
+    offline. Reports whether the Prefect engine is installed."""
+    from . import flows
+
+    r = flows.snapshot_pipeline()   # identical FlowResult to the Prefect path; fast + quiet
+    c = r.contract
+    return {
+        "has_prefect": flows.HAS_PREFECT,
+        "stages": [
+            {"name": "ingest", "detail": f"{r.ingested} rows from snapshot", "ok": True},
+            {"name": "normalize", "detail": f"{r.normalized} rows · title-brand extracted", "ok": True},
+            {"name": "quality-gate", "detail": f"{c.valid}/{c.total} valid · Pydantic contract", "ok": c.passed},
+            {"name": "label", "detail": f"{r.labeled} rows · two-signal verdict", "ok": True},
+            {"name": "good_deals model", "detail": f"{r.good_deals} rows · dbt-style SQL (10–90% band)", "ok": True},
+        ],
+        "contract": {"total": c.total, "valid": c.valid, "passed": c.passed,
+                     "violations": c.violations[:5]},
+        "label_distribution": r.label_distribution,
+        "good_deals": r.good_deals,
+    }
+
+
 @app.get("/dataset")
 def dataset_report():
     """Dataset engineering (Part 19): make the labeled training set inspectable.

@@ -94,3 +94,16 @@ def test_dataset_endpoint_reports_labels_split_and_weights():
     assert b["split"]["train_rows"] == 210 and b["split"]["test_rows"] == 60
     assert len(b["split"]["train_queries"]) == 14 and len(b["split"]["test_queries"]) == 4
     assert b["split"]["disjoint"] is True                  # no query straddles the split
+
+
+def test_pipeline_endpoint_runs_the_five_stages():
+    # Part 20 surface: the orchestrated flow's trail — gate + label dist + good_deals.
+    r = client.get("/pipeline")
+    assert r.status_code == 200
+    b = r.json()
+    assert [s["name"] for s in b["stages"]] == \
+        ["ingest", "normalize", "quality-gate", "label", "good_deals model"]
+    assert all(s["ok"] for s in b["stages"])
+    assert b["contract"] == {"total": 270, "valid": 270, "passed": True, "violations": []}
+    assert b["label_distribution"] == {"deal": 71, "fair": 40, "suspicious": 32, "overpriced": 127}
+    assert b["good_deals"] == 111
