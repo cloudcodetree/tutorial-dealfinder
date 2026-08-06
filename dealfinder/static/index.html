@@ -53,6 +53,7 @@
       <label><input type="radio" name="mode" value="review"> review (multi-agent)</label>
       <label><input type="radio" name="mode" value="dataset"> dataset (ML)</label>
       <label><input type="radio" name="mode" value="pipeline"> pipeline (ML)</label>
+      <label><input type="radio" name="mode" value="models"> models (ML)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -296,6 +297,37 @@ function pipelinePanel(d) {
   </div>`;
 }
 
+// Render the Part 21 model comparison: MAE bars for linear vs GBDT+embeddings on
+// the full corpus, the boosting-alone failure, the audio subset, and the PyTorch MLP.
+function modelsPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const maxMae = Math.max(d.full.linear_mae, d.full.gbdt_mae, d.hand_only.gbdt_mae, d.torch_mlp.mae);
+  const barRow = (label, mae, color, note) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+      <span style="width:210px;color:#e6edf3">${esc(label)}</span>
+      <div style="flex:1;background:#0b0f14;border-radius:5px;overflow:hidden;height:20px;border:1px solid var(--line)">
+        <div style="height:100%;width:${(mae/maxMae*100).toFixed(0)}%;background:${color}55;border-right:2px solid ${color}"></div>
+      </div>
+      <span style="width:120px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:700">$${esc(mae)}${note ? `<span style="color:var(--mut);font-weight:400;font-size:11px"> ${esc(note)}</span>` : ""}</span>
+    </div>`;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:840px">
+    <div class="row" style="margin:0 0 12px;gap:8px">
+      ${chip("#8b98a8", `split ${d.split.n_train}/${d.split.n_test} · seed 0`)}
+      ${chip("#3fb950", `−${esc(d.full.improvement_pct)}% MAE`)}
+      ${chip("#58a6ff", `R² ${esc(d.full.linear_r2)} → ${esc(d.full.gbdt_r2)}`)}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Full corpus (270 items) · lower MAE is better</div>
+    ${barRow("Linear baseline (Part 3)", d.full.linear_mae, "#8b98a8", "R² " + d.full.linear_r2)}
+    ${barRow("GBDT, hand features only", d.hand_only.gbdt_mae, "#f0a30a", "worse! " + d.hand_only.improvement_pct + "%")}
+    ${barRow("GBDT + title embeddings", d.full.gbdt_mae, "#3fb950", "R² " + d.full.gbdt_r2)}
+    ${barRow("PyTorch MLP (hand only)", d.torch_mlp.mae, "#58a6ff", "loss " + d.torch_mlp.final_loss)}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px">
+      Gradient boosting is <b style="color:#f0a30a">not</b> a free win: on the three-integer hand vector it <b style="color:#e6edf3">overfits</b> and loses to linear ($${esc(d.hand_only.gbdt_mae)} vs $${esc(d.full.linear_mae)}). The <b style="color:#3fb950">title embeddings</b> are the hero — adding 16 PCA dims drops MAE to $${esc(d.full.gbdt_mae)} (R² ${esc(d.full.linear_r2)} → ${esc(d.full.gbdt_r2)}). The MLP is a real autograd loop, trained live.
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-top:8px;border-top:1px solid #222a35;padding-top:8px">audio hero subset (${esc(d.audio.n_test)} test): linear $${esc(d.audio.linear_mae)} → GBDT $${esc(d.audio.gbdt_mae)} (−${esc(d.audio.improvement_pct)}% MAE, but R² stays negative on 15 items — trust MAE on the bigger sample)</div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -305,8 +337,17 @@ async function run(q) {
     : m === "review" ? "writer drafts, reviewer adversarially checks, orchestrator revises if rejected…"
     : m === "dataset" ? "building the labeled training set from the frozen snapshot…"
     : m === "pipeline" ? "running the 5-stage orchestration flow…"
+    : m === "models" ? "fitting linear, GBDT+embeddings, and a PyTorch MLP on the snapshot…"
     : "searching live sources…";
   try {
+    if (m === "models") {
+      const r = await fetch("/models");
+      const d = await r.json();
+      $("meta").textContent = `linear $${d.full.linear_mae} → GBDT+emb $${d.full.gbdt_mae} · −${d.full.improvement_pct}% MAE · R² ${d.full.linear_r2}→${d.full.gbdt_r2}`;
+      $("grid").innerHTML = modelsPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "pipeline") {
       const r = await fetch("/pipeline");
       const d = await r.json();
@@ -404,7 +445,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || mode() === "dataset" || mode() === "pipeline") run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models"].includes(mode())) run(q); });
 </script>
 </body>
 </html>

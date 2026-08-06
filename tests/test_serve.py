@@ -107,3 +107,17 @@ def test_pipeline_endpoint_runs_the_five_stages():
     assert b["contract"] == {"total": 270, "valid": 270, "passed": True, "violations": []}
     assert b["label_distribution"] == {"deal": 71, "fair": 40, "suspicious": 32, "overpriced": 127}
     assert b["good_deals"] == 111
+
+
+def test_models_endpoint_reports_the_gbdt_lift():
+    # Part 21 surface: linear vs GBDT+embeddings, the hand-only loss, and the MLP.
+    r = client.get("/models")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["split"] == {"n_train": 202, "n_test": 68, "seed": 0}
+    assert b["full"]["linear_mae"] == 227.89 and b["full"]["gbdt_mae"] == 138.11
+    assert b["full"]["improvement_pct"] == 39.4
+    assert b["full"]["linear_r2"] == 0.268 and b["full"]["gbdt_r2"] == 0.727
+    assert b["hand_only"]["gbdt_mae"] == 257.99      # boosting alone loses
+    assert b["audio"]["gbdt_mae"] == 123.81
+    assert b["torch_mlp"]["mae"] == 117.11 and b["torch_mlp"]["real"] is True

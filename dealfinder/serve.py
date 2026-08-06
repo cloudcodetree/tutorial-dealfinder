@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -298,6 +299,56 @@ def context_window(q: str, budget: int = 256, k: int = 20):
             for it in packed.dropped
         ],
     }
+
+
+@lru_cache(maxsize=1)
+def _models_report() -> dict:
+    """Fit the Part 21 models once and cache — deterministic (fixed seeds)."""
+    import numpy as np
+    from sklearn.metrics import r2_score
+    from . import models as M
+
+    full = M.gbdt_vs_linear()                      # linear vs GBDT+embeddings, all 270
+    hand = M.gbdt_vs_linear(with_embeddings=False)  # boosting alone — the honest loss
+    audio = M.gbdt_vs_linear("audio")               # 15-item hero subset
+    torch_res = M.train_torch_pricehead(epochs=300, hidden=16, lr=0.05, seed=0)
+
+    # Full-corpus R² (not carried on ModelComparison) — refit once for the headline.
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.decomposition import PCA
+    from dealfinder.dealmodel import LinearModel
+    from dealfinder.features import feature_matrix
+    prods = M.load_products()
+    X = feature_matrix(prods); y = np.asarray([p.price for p in prods], float)
+    tr, te = M._split(len(prods))
+    lin = LinearModel().fit(X[tr], y[tr])
+    emb = M._aligned_embeddings(prods)
+    pca = PCA(n_components=16, random_state=0).fit(emb[tr])
+    g = GradientBoostingRegressor(random_state=0).fit(
+        np.hstack([X[tr], pca.transform(emb[tr])]), y[tr])
+    lin_r2 = round(float(r2_score(y[te], lin.predict(X[te]))), 3)
+    gbdt_r2 = round(float(r2_score(y[te], g.predict(np.hstack([X[te], pca.transform(emb[te])])))), 3)
+
+    return {
+        "split": {"n_train": full.n_train, "n_test": full.n_test, "seed": 0},
+        "full": {"linear_mae": full.linear_mae, "gbdt_mae": full.gbdt_mae,
+                 "improvement_pct": full.improvement_pct, "linear_r2": lin_r2, "gbdt_r2": gbdt_r2},
+        "hand_only": {"gbdt_mae": hand.gbdt_mae, "improvement_pct": hand.improvement_pct},
+        "audio": {"n_test": audio.n_test, "linear_mae": audio.linear_mae,
+                  "gbdt_mae": audio.gbdt_mae, "improvement_pct": audio.improvement_pct},
+        "torch_mlp": {"mae": torch_res.mae, "final_loss": torch_res.final_loss, "real": torch_res.real},
+    }
+
+
+@app.get("/models")
+def models_report():
+    """ML & DL breadth (Part 21): fit linear vs GBDT+embeddings and show the lift.
+
+    Runs the real models on the frozen snapshot: the linear baseline, the gradient-
+    boosted regressor with PCA-compressed title embeddings (the 39% MAE win), the
+    boosting-alone case that *loses* without embeddings, and a real PyTorch MLP.
+    Cached after the first fit; deterministic (fixed seeds)."""
+    return _models_report()
 
 
 @app.get("/pipeline")
