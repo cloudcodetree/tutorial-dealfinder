@@ -302,6 +302,36 @@ def context_window(q: str, budget: int = 256, k: int = 20):
 
 
 @lru_cache(maxsize=1)
+def _evals_report() -> dict:
+    """Run the eval gate once and cache — deterministic against the frozen snapshot."""
+    from . import evals
+    g = evals.load_golden()
+    from collections import Counter
+    ts = evals.evaluate(evals.two_signal_ranker)
+    mo = evals.evaluate(evals.median_only_ranker)
+    ab = evals.ab_compare("two_signal", ts["precision_at_5"], "median_only", mo["precision_at_5"])
+    return {
+        "n": len(g),
+        "distribution": dict(Counter(x["label"] for x in g)),
+        "gate": evals.GATE_PRECISION, "k": evals.GATE_K,
+        "two_signal": {"precision_at_5": ts["precision_at_5"], "passes": ts["passes_gate"], "top5": ts["top5"]},
+        "median_only": {"precision_at_5": mo["precision_at_5"], "passes": mo["passes_gate"], "top5": mo["top5"]},
+        "ab": ab,
+    }
+
+
+@app.get("/evals")
+def evals_report():
+    """Evaluation as a discipline (Part 23): the eval gate, made visible.
+
+    Runs precision@5 on the 20-item hand-labeled golden set for both rankers and
+    returns the gate result + each ranker's top-5. The two-signal ranker clears the
+    0.80 gate (1.00); the naive median-only baseline is fooled by cheap-for-the-wrong
+    -reason traps and fails (0.40). Deterministic, offline, cached."""
+    return _evals_report()
+
+
+@lru_cache(maxsize=1)
 def _tracking_report() -> dict:
     """Run the MLflow experiment once and cache — deterministic (seeded)."""
     from . import tracking

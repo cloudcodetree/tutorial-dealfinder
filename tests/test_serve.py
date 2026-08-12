@@ -138,3 +138,17 @@ def test_tracking_endpoint_reports_the_ledger_and_winner():
     assert runs["gbdt"]["selectable"] and runs["gbdt"]["contract"] == "fair-price"
     assert not runs["torch_baseline"]["selectable"]      # logged, not selectable
     assert abs(runs["torch_baseline"]["mae"] - 117.11) < 0.05
+
+
+def test_evals_endpoint_reports_the_gate_and_both_rankers():
+    # Part 23 surface: the eval gate + both rankers' top-5 on the golden set.
+    r = client.get("/evals")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["n"] == 20 and b["distribution"]["deal"] == 6
+    assert b["two_signal"]["precision_at_5"] == 1.0 and b["two_signal"]["passes"] is True
+    assert b["median_only"]["precision_at_5"] == 0.4 and b["median_only"]["passes"] is False
+    assert b["ab"] == {"winner": "two_signal", "delta": 0.6}
+    # two_signal top-5 are all real deals; median_only is fooled by suspicious traps
+    assert all(t["label"] == "deal" for t in b["two_signal"]["top5"])
+    assert any(t["label"] == "suspicious" for t in b["median_only"]["top5"])

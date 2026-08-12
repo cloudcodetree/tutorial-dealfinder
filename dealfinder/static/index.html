@@ -55,6 +55,7 @@
       <label><input type="radio" name="mode" value="pipeline"> pipeline (ML)</label>
       <label><input type="radio" name="mode" value="models"> models (ML)</label>
       <label><input type="radio" name="mode" value="tracking"> tracking (ML)</label>
+      <label><input type="radio" name="mode" value="evals"> evals (ML)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -368,6 +369,46 @@ function trackingPanel(d) {
   </div>`;
 }
 
+// Render the eval gate (Part 23): precision@5 on the 20-item golden set for both
+// rankers, side by side — the two-signal ranker clears the 0.80 gate, the naive
+// median-only baseline is fooled by cheap-for-the-wrong-reason traps and fails.
+function evalsPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const LABEL = { deal:"#3fb950", fair:"#58a6ff", suspicious:"#f0a30a", overpriced:"#8b98a8" };
+  const col = (name, r) => {
+    const pass = r.passes;
+    const c = pass ? "#3fb950" : "#f0a30a";
+    const rows = r.top5.map((t,i) => `
+      <div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:12.5px">
+        <span style="width:16px;color:var(--mut)">${i+1}</span>
+        <span class="src" style="color:${LABEL[t.label]};border-color:${LABEL[t.label]}66;min-width:78px;text-align:center">${esc(t.label)}</span>
+        <span style="flex:1;min-width:0;color:#e6edf3">${esc(t.title)}</span>
+      </div>`).join("");
+    return `<div style="flex:1;min-width:300px">
+      <div class="row" style="margin:0 0 6px;gap:8px">
+        <b style="color:#e6edf3">${esc(name)}</b>
+        ${chip(c, "p@5 " + r.precision_at_5.toFixed(2))}
+        ${chip(c, pass ? "GATE PASS ✓" : "GATE FAIL ✗")}
+      </div>
+      ${rows}
+    </div>`;
+  };
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    <div class="row" style="margin:0 0 12px;gap:8px">
+      ${chip("#8b98a8", d.n + " golden items")}
+      ${chip("#58a6ff", "gate: precision@" + d.k + " ≥ " + d.gate)}
+      ${chip("#3fb950", "A/B winner: " + d.ab.winner + " +" + d.ab.delta)}
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap">
+      ${col("two_signal", d.two_signal)}
+      ${col("median_only", d.median_only)}
+    </div>
+    <div style="font-size:12px;color:#8b98a8;margin-top:12px;border-top:1px solid #222a35;padding-top:10px">
+      Same 20 hand-labeled listings, two rankers. The <b style="color:#3fb950">two-signal</b> ranker's top-5 are all real <b style="color:#3fb950">deals</b> (p@5 = 1.00). The naive <b style="color:#f0a30a">median-only</b> baseline is fooled — a $10.75 Kindle and a $15 Galaxy Tab read as huge discounts, so its top-5 is mostly <b style="color:#f0a30a">suspicious</b> traps (p@5 = 0.40, below the 0.80 gate). That +0.60 is a number you put in a PR, wired into CI so a regression can't merge.
+    </div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -379,8 +420,17 @@ async function run(q) {
     : m === "pipeline" ? "running the 5-stage orchestration flow…"
     : m === "models" ? "fitting linear, GBDT+embeddings, and a PyTorch MLP on the snapshot…"
     : m === "tracking" ? "running the MLflow experiment — logging five runs, selecting the winner…"
+    : m === "evals" ? "running the eval gate — precision@5 on the golden set, both rankers…"
     : "searching live sources…";
   try {
+    if (m === "evals") {
+      const r = await fetch("/evals");
+      const d = await r.json();
+      $("meta").textContent = `two_signal p@5 ${d.two_signal.precision_at_5.toFixed(2)} ${d.two_signal.passes ? "PASS" : "FAIL"} · median_only ${d.median_only.precision_at_5.toFixed(2)} ${d.median_only.passes ? "PASS" : "FAIL"} · gate ≥ ${d.gate}`;
+      $("grid").innerHTML = evalsPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "tracking") {
       const r = await fetch("/tracking");
       const d = await r.json();
@@ -496,7 +546,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
