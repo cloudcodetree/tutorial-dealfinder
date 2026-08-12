@@ -152,3 +152,17 @@ def test_evals_endpoint_reports_the_gate_and_both_rankers():
     # two_signal top-5 are all real deals; median_only is fooled by suspicious traps
     assert all(t["label"] == "deal" for t in b["two_signal"]["top5"])
     assert any(t["label"] == "suspicious" for t in b["median_only"]["top5"])
+
+
+def test_mlops_endpoint_reports_the_full_cycle():
+    # Part 24 surface: drift → retrain → gate → promote, one auditable trace.
+    r = client.get("/mlops")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["drift"]["psi"] == 0.3182 and b["drift"]["drifted"] is True
+    assert b["retrained"] is True and b["retrain"]["gbdt_mae"] == 138.11
+    assert b["gate"]["challenger"] == "two_signal" and b["gate"]["precision_at_5"] == 1.0
+    assert b["gate"]["passes"] is True
+    assert b["champion"] == "median_only" and b["champion_precision_at_5"] == 0.4
+    assert b["promote"] is True
+    assert len(b["trace"]) == 4      # drift, retrain, gate, promote

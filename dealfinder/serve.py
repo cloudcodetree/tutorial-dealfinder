@@ -302,6 +302,36 @@ def context_window(q: str, budget: int = 256, k: int = 20):
 
 
 @lru_cache(maxsize=1)
+def _mlops_report() -> dict:
+    """Run the MLOps cycle once and cache — deterministic against the frozen snapshot."""
+    from . import mlops
+    d = mlops.run_mlops_cycle(frac=0.3, challenger="two_signal", champion="median_only")
+    rr = d.retrain_report
+    return {
+        "drift": {"psi": d.drift.psi, "threshold": d.drift.threshold, "drifted": d.drift.drifted},
+        "retrained": d.retrained,
+        "retrain": None if rr is None else {
+            "gbdt_mae": rr.gbdt_mae, "linear_mae": rr.linear_mae,
+            "improvement_pct": rr.improvement_pct, "n_train": rr.n_train, "n_test": rr.n_test},
+        "gate": {"challenger": d.gate.challenger, "precision_at_5": d.gate.precision_at_5,
+                 "threshold": d.gate.gate, "passes": d.gate.passes_gate},
+        "champion": d.champion, "champion_precision_at_5": d.champion_precision_at_5,
+        "promote": d.promote, "reason": d.reason, "trace": list(d.trace),
+    }
+
+
+@app.get("/mlops")
+def mlops_report():
+    """Closing the MLOps loop (Part 24): the drift→retrain→gate→promote cycle, visible.
+
+    Runs the full auditable cycle: PSI drift detection (a 30% category shift trips the
+    0.2 threshold), a deterministic retrain (GBDT MAE $138.11), the precision@5 eval
+    gate (two_signal 1.00 PASS), and champion/challenger promotion — returning the
+    CycleDecision trace. Deterministic, offline, cached."""
+    return _mlops_report()
+
+
+@lru_cache(maxsize=1)
 def _evals_report() -> dict:
     """Run the eval gate once and cache — deterministic against the frozen snapshot."""
     from . import evals

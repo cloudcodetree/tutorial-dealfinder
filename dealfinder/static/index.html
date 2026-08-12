@@ -56,6 +56,7 @@
       <label><input type="radio" name="mode" value="models"> models (ML)</label>
       <label><input type="radio" name="mode" value="tracking"> tracking (ML)</label>
       <label><input type="radio" name="mode" value="evals"> evals (ML)</label>
+      <label><input type="radio" name="mode" value="mlops"> mlops (ML)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -409,6 +410,41 @@ function evalsPanel(d) {
   </div>`;
 }
 
+// Render the MLOps loop (Part 24): the four stations — drift, retrain, eval gate,
+// promote — as one auditable cycle, with each station's real result + the decision.
+function mlopsPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const station = (i, name, ok, detail, last) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 0">
+      <span style="width:22px;height:22px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:12px;background:${ok?"#3fb95022":"#f0a30a22"};border:1px solid ${ok?"#3fb950":"#f0a30a"};color:${ok?"#3fb950":"#f0a30a"}">${ok?"✓":"✗"}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;color:#e6edf3">${esc(name)}</div>
+        <div style="font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">${detail}</div>
+      </div>
+      ${!last ? `<span style="color:#8b98a8">↓</span>` : ``}
+    </div>`;
+  const dr = d.drift, rt = d.retrain, gt = d.gate;
+  const promoteColor = d.promote ? "#3fb950" : "#f0a30a";
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:840px">
+    <div class="row" style="margin:0 0 12px;gap:8px">
+      ${chip("#f0a30a", `PSI ${dr.psi} ≥ ${dr.threshold} → DRIFT`)}
+      ${chip("#58a6ff", `gate ≥ ${gt.threshold}`)}
+      ${chip(promoteColor, d.promote ? "★ PROMOTED" : "✗ NOT PROMOTED")}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Four stations · one auditable cycle · fires on evidence</div>
+    ${station(1, "drift detection (PSI)", dr.drifted, `PSI ${dr.psi} vs threshold ${dr.threshold} → ${dr.drifted?"DRIFT — retrain":"hold"}`, false)}
+    ${station(2, "deterministic retrain", d.retrained, rt ? `GBDT MAE $${rt.gbdt_mae} vs linear $${rt.linear_mae} (${rt.improvement_pct}% better) · ${rt.n_train}/${rt.n_test} split` : "skipped (no drift)", false)}
+    ${station(3, "eval gate (precision@5)", gt.passes, `${gt.challenger}: p@5 ${gt.precision_at_5.toFixed(2)} vs ${gt.threshold} → ${gt.passes?"PASS":"FAIL"}`, false)}
+    ${station(4, "champion / challenger promote", d.promote, `challenger ${gt.precision_at_5.toFixed(2)} vs champion ${d.champion} ${d.champion_precision_at_5.toFixed(2)} → ${d.promote?"promote":"hold champion"}`, true)}
+    <div style="font-size:12.5px;color:#e6edf3;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">
+      <b style="color:${promoteColor}">${esc(d.reason)}</b>
+    </div>
+    <div style="font-size:11px;color:#8b98a8;margin-top:8px">
+      Promotion needs <b style="color:#e6edf3">both</b>: pass the 0.80 gate <i>and</i> strictly beat the champion. Every decision — PSI, MAE, precision@5, the reason — is recorded in the returned trace, not a log line. That's the artifact you audit.
+    </div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -421,8 +457,17 @@ async function run(q) {
     : m === "models" ? "fitting linear, GBDT+embeddings, and a PyTorch MLP on the snapshot…"
     : m === "tracking" ? "running the MLflow experiment — logging five runs, selecting the winner…"
     : m === "evals" ? "running the eval gate — precision@5 on the golden set, both rankers…"
+    : m === "mlops" ? "running the MLOps cycle — drift, retrain, gate, promote…"
     : "searching live sources…";
   try {
+    if (m === "mlops") {
+      const r = await fetch("/mlops");
+      const d = await r.json();
+      $("meta").textContent = `PSI ${d.drift.psi} → ${d.drift.drifted ? "DRIFT" : "hold"} · retrain GBDT $${d.retrain ? d.retrain.gbdt_mae : "—"} · gate ${d.gate.precision_at_5.toFixed(2)} ${d.gate.passes ? "PASS" : "FAIL"} · ${d.promote ? "PROMOTED" : "held"}`;
+      $("grid").innerHTML = mlopsPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "evals") {
       const r = await fetch("/evals");
       const d = await r.json();
@@ -546,7 +591,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
