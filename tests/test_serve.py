@@ -166,3 +166,19 @@ def test_mlops_endpoint_reports_the_full_cycle():
     assert b["champion"] == "median_only" and b["champion_precision_at_5"] == 0.4
     assert b["promote"] is True
     assert len(b["trace"]) == 4      # drift, retrain, gate, promote
+
+
+def test_safety_endpoint_reports_every_guardrail_layer():
+    # Part 25 surface: injection, PII, spec validation, audit, tool-trust.
+    r = client.get("/safety")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["injection"]["attack"]["flagged"] is True
+    assert b["injection"]["clean"]["flagged"] is False
+    assert b["pii"]["after"] == "mail me at [email] or call [phone], card [card]"
+    assert b["spec"]["ok"]["errors"] == []
+    assert set(b["spec"]["bad"]["errors"]) == {"category unknown", "condition invalid"}
+    assert b["audit"]["action"] == "tool_call"
+    assert b["tool_trust"]["registered"] == ["search_deals", "score_deal"]
+    assert b["tool_trust"]["quarantined"][0]["name"] == "get_weather"
+    assert b["tool_trust"]["deps"]["reqests"] == "requests"   # slopsquat blocked

@@ -57,6 +57,7 @@
       <label><input type="radio" name="mode" value="tracking"> tracking (ML)</label>
       <label><input type="radio" name="mode" value="evals"> evals (ML)</label>
       <label><input type="radio" name="mode" value="mlops"> mlops (ML)</label>
+      <label><input type="radio" name="mode" value="safety"> safety (sec)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -445,6 +446,43 @@ function mlopsPanel(d) {
   </div>`;
 }
 
+// Render the guardrail stack (Part 25): every untrusted-text layer with its real
+// verdict — injection detection, PII redaction, spec validation, audit, tool trust.
+function safetyPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const G = "#3fb950", R = "#f0a30a", MUT = "#8b98a8";
+  const layer = (title, body) => `
+    <div style="border-top:1px solid #1c2431;padding:10px 0">
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${title}</div>
+      ${body}
+    </div>`;
+  const line = (color, mark, text) => `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0;font-size:13px">
+      <span style="color:${color};font-weight:700;width:14px">${mark}</span><span style="flex:1;min-width:0;color:#e6edf3">${text}</span></div>`;
+  const inj = d.injection, spec = d.spec, tt = d.tool_trust;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    <div class="row" style="margin:0 0 4px;gap:8px">
+      ${chip(G, "5 guardrail layers")} ${chip(G, "all stateless · ms each")} ${chip("#58a6ff", "model sits in the middle")}
+    </div>
+    ${layer("1 · prompt-injection detection",
+      line(R, "✗", `<b style="color:${R}">BLOCKED</b> — "${esc(inj.attack.text.slice(0,52))}…"`) +
+      line(G, "✓", `<b style="color:${G}">allowed</b> — "${esc(inj.clean.text)}"`))}
+    ${layer("2 · PII redaction (before logging)",
+      `<div style="font-family:ui-monospace,Menlo,monospace;font-size:12px"><span style="color:${MUT}">in :</span> ${esc(d.pii.before)}<br><span style="color:${MUT}">out:</span> <span style="color:${G}">${esc(d.pii.after)}</span></div>`)}
+    ${layer("3 · spec validation vs the 11 real categories",
+      line(G, "✓", `Sony / audio / new → <span style="color:${G}">[] valid</span>`) +
+      line(R, "✗", `X / <b>tents</b> / <b>mint</b> → <span style="color:${R}">${esc(JSON.stringify(spec.bad.errors))}</span>`))}
+    ${layer("4 · append-only audit log",
+      `<div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#e6edf3">${esc(JSON.stringify(d.audit))}</div>`)}
+    ${layer("5 · tool supply-chain vetting",
+      line(G, "✓", `registered: <span style="color:${G}">${esc(tt.registered.join(", "))}</span>`) +
+      line(R, "✗", `quarantined: <b style="color:${R}">${esc(tt.quarantined[0].name)}</b> — ${esc(tt.quarantined[0].issues.length)} issues (off-allowlist, injection, exfiltrate)`) +
+      line(R, "✗", `slopsquat: <b>reqests</b> → blocked (typo of <span style="color:${G}">${esc(tt.deps.reqests)}</span>)`))}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">
+      Every one of these is untrusted text — a scraped title, a user query, a tool description, a package name. None needs an API call; all are under 15 lines and tested. Skipping one is how incidents happen.
+    </div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -458,8 +496,17 @@ async function run(q) {
     : m === "tracking" ? "running the MLflow experiment — logging five runs, selecting the winner…"
     : m === "evals" ? "running the eval gate — precision@5 on the golden set, both rankers…"
     : m === "mlops" ? "running the MLOps cycle — drift, retrain, gate, promote…"
+    : m === "safety" ? "running untrusted text through every guardrail layer…"
     : "searching live sources…";
   try {
+    if (m === "safety") {
+      const r = await fetch("/safety");
+      const d = await r.json();
+      $("meta").textContent = `injection ${d.injection.attack.flagged ? "blocked" : "MISSED"} · PII redacted · spec ${d.spec.bad.errors.length} errors caught · ${d.tool_trust.quarantined.length} tool quarantined`;
+      $("grid").innerHTML = safetyPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "mlops") {
       const r = await fetch("/mlops");
       const d = await r.json();
@@ -591,7 +638,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
