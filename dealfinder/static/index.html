@@ -58,6 +58,7 @@
       <label><input type="radio" name="mode" value="evals"> evals (ML)</label>
       <label><input type="radio" name="mode" value="mlops"> mlops (ML)</label>
       <label><input type="radio" name="mode" value="safety"> safety (sec)</label>
+      <label><input type="radio" name="mode" value="inference"> inference (perf)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -483,6 +484,38 @@ function safetyPanel(d) {
   </div>`;
 }
 
+// Render the inference-optimization levers (Part 27): measured cache hit rates at
+// two thresholds, the illustrative batching model, and anchored GPU refs — each
+// flagged measured vs illustrative (the honesty contract).
+function inferencePanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const c95 = d.cache_095, c90 = d.cache_090, b = d.batching;
+  const bar = (label, frac, color, note) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+      <span style="width:130px;color:#e6edf3;font-size:13px">${esc(label)}</span>
+      <div style="flex:1;background:#0b0f14;border-radius:5px;overflow:hidden;height:18px;border:1px solid var(--line)">
+        <div style="height:100%;width:${(frac*100).toFixed(0)}%;background:${color}55;border-right:2px solid ${color}"></div>
+      </div>
+      <span style="width:150px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12px">${note}</span>
+    </div>`;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:880px">
+    <div class="row" style="margin:0 0 4px;gap:8px">
+      ${chip("#3fb950", "2 measured levers")} ${chip("#f0a30a", "2 illustrative/anchored")} ${chip("#58a6ff", "no GPU, no network")}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 2px">Lever 1 · semantic cache — the threshold is the knob <span style="color:#3fb950">(measured)</span></div>
+    ${bar("threshold 0.95", c95.hits/c95.n_queries, "#8b98a8", `${esc(c95.hits)}/${esc(c95.n_queries)} hits · ${esc(c95.hit_rate)}`)}
+    ${bar("threshold 0.90", c90.hits/c90.n_queries, "#3fb950", `${esc(c90.hits)}/${esc(c90.n_queries)} hits · ${esc(c90.hit_rate)}`)}
+    <div style="font-size:12px;color:#8b98a8;margin-top:4px">The XM5 near-duplicate pair sits at cosine <b style="color:#e6edf3">${esc(c95.near_duplicate_cosine)}</b> — misses at 0.95, hits at 0.90. Lowering the threshold 0.05 buys one more hit (and the risk of a wrong answer).</div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 2px">Lever 3 · batching — amortize call overhead <span style="color:#f0a30a">(illustrative)</span></div>
+    ${bar(`per-item (×${b.n_items})`, 1, "#f0a30a", `${esc(b.per_item_seconds)}s`)}
+    ${bar("batched (1 call)", b.batched_seconds/b.per_item_seconds, "#3fb950", `${esc(b.batched_seconds)}s · ${esc(b.speedup)}× faster`)}
+    <div style="font-size:12px;color:#8b98a8;margin-top:4px">Modeled from assumed constants (overhead ≫ per-item compute), not a device benchmark — the <code>illustrative=True</code> flag is the type signature, not a caveat.</div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Lever 4 · quantization &amp; vLLM — need a GPU <span style="color:#58a6ff">(anchored)</span></div>
+    ${d.anchored.map(a => `<div style="font-size:12.5px;color:#e6edf3;padding:2px 0"><b>${esc(a.name)}</b> — <span style="color:#8b98a8;font-family:ui-monospace,Menlo,monospace;font-size:11px">${esc(Object.entries(a.numbers).filter(([k])=>k!=="note").map(([k,v])=>k+"="+v).join(" · "))} → ${esc(a.script)}</span></div>`).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">The fastest inference is the request you never send. Two levers are measured here for \$0; two need real hardware — and the code refuses to print fake GPU numbers on a CPU.</div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -497,8 +530,17 @@ async function run(q) {
     : m === "evals" ? "running the eval gate — precision@5 on the golden set, both rankers…"
     : m === "mlops" ? "running the MLOps cycle — drift, retrain, gate, promote…"
     : m === "safety" ? "running untrusted text through every guardrail layer…"
+    : m === "inference" ? "measuring the inference-optimization levers — cache, batching, GPU refs…"
     : "searching live sources…";
   try {
+    if (m === "inference") {
+      const r = await fetch("/inference");
+      const d = await r.json();
+      $("meta").textContent = `cache 0.95 ${d.cache_095.hits}/${d.cache_095.n_queries} → 0.90 ${d.cache_090.hits}/${d.cache_090.n_queries} · batching ${d.batching.speedup}× (illustrative) · 2 anchored GPU refs`;
+      $("grid").innerHTML = inferencePanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "safety") {
       const r = await fetch("/safety");
       const d = await r.json();
@@ -638,7 +680,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference"].includes(mode())) run(q); });
 </script>
 </body>
 </html>

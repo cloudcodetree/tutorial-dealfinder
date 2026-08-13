@@ -302,6 +302,40 @@ def context_window(q: str, budget: int = 256, k: int = 20):
 
 
 @lru_cache(maxsize=1)
+def _inference_report() -> dict:
+    """Assemble the four inference-optimization levers — Part 27. Cached, offline."""
+    from . import inference as inf
+    rep = inf.run_inference_report()
+    def _cache(c):
+        return {"threshold": c.threshold, "n_queries": c.n_queries, "hits": c.hits,
+                "hit_rate": c.hit_rate, "near_duplicate_cosine": c.near_duplicate_cosine,
+                "measured": c.measured}
+    b = rep.batching
+    return {
+        "cache_095": _cache(rep.cache_at_095),
+        "cache_090": _cache(rep.cache_at_090),
+        "batching": {"n_items": b.n_items, "per_item_seconds": b.per_item_seconds,
+                     "batched_seconds": b.batched_seconds, "speedup": b.speedup,
+                     "illustrative": b.illustrative},
+        "anchored": [{"name": a.name, "illustrative": a.illustrative,
+                      "numbers": a.illustrative_numbers, "script": a.runnable_script}
+                     for a in rep.anchored],
+    }
+
+
+@app.get("/inference")
+def inference_report():
+    """Inference optimization (Part 27): the four cost/latency levers, made visible.
+
+    Returns the measured semantic-cache hit rates at two thresholds (0.95 → 6/14,
+    0.90 → 7/14, the XM5 near-duplicate at cosine 0.9498 crossing the gate), the
+    illustrative batching amortization model (16x on assumed constants), and the
+    anchored GPU references (quantization, vLLM) that need real hardware to
+    benchmark. Every figure is flagged measured vs illustrative. Cached, offline."""
+    return _inference_report()
+
+
+@lru_cache(maxsize=1)
 def _safety_report() -> dict:
     """Run the canonical guardrail examples through each layer — Part 25."""
     from . import safety, tool_trust as tt

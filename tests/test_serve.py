@@ -182,3 +182,15 @@ def test_safety_endpoint_reports_every_guardrail_layer():
     assert b["tool_trust"]["registered"] == ["search_deals", "score_deal"]
     assert b["tool_trust"]["quarantined"][0]["name"] == "get_weather"
     assert b["tool_trust"]["deps"]["reqests"] == "requests"   # slopsquat blocked
+
+
+def test_inference_endpoint_reports_the_four_levers():
+    # Part 27 surface: cache hit rates, batching, anchored GPU refs.
+    r = client.get("/inference")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["cache_095"]["hits"] == 6 and b["cache_095"]["hit_rate"] == 0.429
+    assert b["cache_090"]["hits"] == 7 and b["cache_090"]["hit_rate"] == 0.5
+    assert b["cache_095"]["near_duplicate_cosine"] == 0.9498
+    assert b["batching"]["speedup"] == 16.0 and b["batching"]["illustrative"] is True
+    assert len(b["anchored"]) == 2 and all(a["illustrative"] for a in b["anchored"])
