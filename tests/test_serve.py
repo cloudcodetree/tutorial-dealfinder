@@ -245,3 +245,28 @@ def test_suggestions_endpoint_reports_the_diff_loop():
     n3 = runs[2]["notifications"]
     assert len(n3) == 1 and n3[0]["query"] == "bluetooth speaker"
     assert n3[0]["deal_score"] >= 0.30
+
+
+def test_billing_endpoint_reports_plans_quota_webhook_and_checkout():
+    # Part 34 surface: billing.py exercised read-only (plans, quota, webhook, checkout).
+    r = client.get("/billing")
+    assert r.status_code == 200
+    b = r.json()
+    plans = {p["key"]: p["monthly_searches"] for p in b["plans"]}
+    assert plans == {"free": 25, "pro": 1000}
+    # quota gate: the 26th free search is blocked; pro clears the free limit.
+    assert b["metering"]["free_limit"] == 25
+    assert "25 searches/mo" in b["metering"]["free_blocked"]
+    assert b["metering"]["pro_within_quota_at_free_limit"] is True
+    # webhook verification (real HMAC): good → entitlement, bad/wrong → rejected, other → ignored.
+    w = b["webhook"]
+    assert w["good_signature"] == {"ok": True, "entitlement": {"user_id": "user-123", "plan": "pro"}}
+    assert w["bad_signature"] == {"ok": False, "error": "SignatureVerificationError"}
+    assert w["wrong_secret"] == {"ok": False, "error": "SignatureVerificationError"}
+    assert w["other_event"] == {"ok": True, "entitlement": None}
+    # checkout builder shape (mock client, no network).
+    c = b["checkout"]
+    assert c["mode"] == "subscription"
+    assert c["line_items"] == [{"price": "price_demo_pro_123", "quantity": 1}]
+    assert c["metadata"] == {"user_id": "user-9", "plan": "pro"}
+    assert c["returned"]["id"] == "cs_demo_abc"

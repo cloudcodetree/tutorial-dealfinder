@@ -62,6 +62,7 @@
       <label><input type="radio" name="mode" value="ops"> ops (cost)</label>
       <label><input type="radio" name="mode" value="auth"> auth (SaaS)</label>
       <label><input type="radio" name="mode" value="suggestions"> suggestions (worker)</label>
+      <label><input type="radio" name="mode" value="billing"> billing (Stripe)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -521,6 +522,44 @@ function inferencePanel(d) {
 
 // Render the ops utilities (Part 30): FinOps cost attribution per model, the budget
 // alert thresholds, and PSI drift detection across three scenarios.
+function billingPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const head = (t) => `<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">${esc(t)}</div>`;
+  // plans
+  const planRow = (p) => `<div style="display:flex;gap:12px;align-items:baseline;padding:3px 0">
+      <span style="width:70px;color:#e6edf3;font-weight:600">${esc(p.name)}</span>
+      <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px">${p.monthly_searches < 0 ? "unlimited" : esc(p.monthly_searches)+" searches/mo"}</span></div>`;
+  // webhook rows
+  const wh = d.webhook;
+  const whRow = (label, res, note) => {
+    const ok = res.ok && res.entitlement;
+    const ignored = res.ok && !res.entitlement;
+    const color = ok ? "#3fb950" : ignored ? "#8b98a8" : "#f85149";
+    const verdict = ok ? `→ Entitlement(${esc(res.entitlement.user_id)}, ${esc(res.entitlement.plan)})`
+      : ignored ? "→ ignored (None)" : "→ SignatureVerificationError";
+    return `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:13px">
+        <span style="width:150px;color:#e6edf3">${esc(label)}</span>
+        <span style="color:${color};font-weight:600;flex:1">${verdict}</span>
+        <span style="color:var(--mut);font-size:12px">${esc(note)}</span></div>`;
+  };
+  const c = d.checkout, m = d.metering;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    ${head("Plans & monthly quota")}
+    ${d.plans.map(planRow).join("")}
+    ${head("Usage metering — the quota gate")}
+    <div style="font-size:13px;color:#e6edf3;padding:2px 0">Free user runs ${esc(m.free_limit)} searches, then the ${esc(m.free_limit+1)}th is ${chip("#f85149","QuotaExceeded")}</div>
+    <div style="font-size:12px;color:#8b98a8;padding:2px 0 0">${esc(m.free_blocked)} — caller returns HTTP 402, prompts upgrade. A pro user at the same ${esc(m.free_limit)}-search level ${chip("#3fb950","still within quota")}</div>
+    ${head("Stripe webhook — verify signature, grant entitlement")}
+    ${whRow("good signature", wh.good_signature, "checkout.session.completed")}
+    ${whRow("tampered payload", wh.bad_signature, "one byte flipped")}
+    ${whRow("wrong secret", wh.wrong_secret, "signed with another key")}
+    ${whRow("other event", wh.other_event, "invoice.paid — not acted on")}
+    ${head("Checkout session builder (mock client, no network)")}
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#b7c2cf;background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:8px 10px;overflow:auto">mode: <b style="color:#e6edf3">${esc(c.mode)}</b> · line_items: ${esc(JSON.stringify(c.line_items))}<br>client_reference_id: ${esc(c.client_reference_id)} · metadata: ${esc(JSON.stringify(c.metadata))}<br>→ ${esc(c.returned.url)}</div>
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">The four things a SaaS billing layer must get right: a plan catalog, a quota gate that blocks over-use, a webhook whose signature is <b>cryptographically verified</b> (a forged event is a 400, never a silent upgrade), and a checkout builder that links the payment back to the user via <code>client_reference_id</code> + <code>metadata</code>. All exercised here with real HMAC and a mock Stripe client — no keys, no network.</div>
+  </div>`;
+}
+
 function suggestionsPanel(d) {
   const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
   const note = (n) => `<div style="display:flex;gap:10px;align-items:baseline;padding:4px 0">
@@ -627,8 +666,18 @@ async function run(q) {
     : m === "ops" ? "running the ops utilities — cost attribution, budget, drift…"
     : m === "auth" ? "verifying Supabase JWTs — valid, expired, tampered, wrong secret, role gate…"
     : m === "suggestions" ? "running the saved-search worker — search, diff against last-seen, notify only new deals…"
+    : m === "billing" ? "exercising billing.py — plans, quota gate, Stripe webhook verification, checkout builder…"
     : "searching live sources…";
   try {
+    if (m === "billing") {
+      const r = await fetch("/billing");
+      const d = await r.json();
+      const good = d.webhook.good_signature.ok && d.webhook.good_signature.entitlement ? 1 : 0;
+      $("meta").textContent = `free ${d.metering.free_limit}/mo · pro ${d.plans.find(p=>p.key==="pro").monthly_searches}/mo · webhook good→grant, 2 rejected, 1 ignored · checkout ${d.checkout.mode}`;
+      $("grid").innerHTML = billingPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "suggestions") {
       const r = await fetch("/suggestions");
       const d = await r.json();
@@ -804,7 +853,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth","suggestions"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth","suggestions","billing"].includes(mode())) run(q); });
 </script>
 </body>
 </html>

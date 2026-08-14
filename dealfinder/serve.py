@@ -475,6 +475,122 @@ def suggestions_report():
 
 
 @lru_cache(maxsize=1)
+def _billing_report() -> dict:
+    """Exercise billing.py read-only — Part 34. Cached, offline; no live Stripe.
+
+    Every figure below is produced by the real dealfinder/billing.py: the PLANS
+    catalog, the meter_usage quota gate, the webhook signature verifier (real
+    HMAC via Stripe's own helper against a demo secret), and the Checkout builder
+    (driven by an injected mock client, never the network)."""
+    import json as _json
+    import time as _time
+
+    import stripe
+
+    from . import billing as B
+
+    plans = [{"key": p.key, "name": p.name, "monthly_searches": p.monthly_searches}
+             for p in B.PLANS.values()]
+
+    # metering / quota gate
+    store: dict = {}
+    free_limit = B.plan_for("free").monthly_searches
+    for _ in range(free_limit):
+        B.meter_usage(store, "u-free", "free")
+    try:
+        B.meter_usage(store, "u-free", "free")  # the 26th call
+        free_blocked = None
+    except B.QuotaExceeded as exc:
+        free_blocked = str(exc)
+    pro_ok_at_free_limit = B.within_quota({"u-pro": free_limit}, "u-pro", "pro")
+
+    # webhook verification — real HMAC, throwaway demo secret
+    secret = "whsec_demo_inspector"
+
+    def _signed(payload, sec=secret, ts=None):
+        # Current time so the signature clears Stripe's 300s timestamp tolerance;
+        # verification runs once here and the result is cached.
+        ts = ts if ts is not None else int(_time.time())
+        body = _json.dumps(payload).encode()
+        sig = stripe.WebhookSignature._compute_signature(f"{ts}.{body.decode()}", sec)
+        return body, f"t={ts},v1={sig}"
+
+    def _wh(body, sig, sec=secret):
+        try:
+            ent = B.handle_webhook(body, sig, sec)
+            return {"ok": True, "entitlement": ({"user_id": ent.user_id, "plan": ent.plan}
+                                                 if ent else None)}
+        except stripe.error.SignatureVerificationError:
+            return {"ok": False, "error": "SignatureVerificationError"}
+
+    good = {"object": "event", "type": "checkout.session.completed",
+            "data": {"object": {"client_reference_id": "user-123",
+                                "metadata": {"user_id": "user-123", "plan": "pro"}}}}
+    other = {"object": "event", "type": "invoice.paid", "data": {"object": {}}}
+    gb, gs = _signed(good)
+    ob, osig = _signed(other)
+    webhook = {
+        "good_signature": _wh(gb, gs),
+        "bad_signature": _wh(gb, "t=1,v1=deadbeef"),
+        "wrong_secret": _wh(*_signed(good, sec="whsec_other")),
+        "other_event": _wh(ob, osig),
+    }
+
+    # Checkout builder — injected mock client, deterministic demo price
+    prev_price = os.environ.get("STRIPE_PRICE_PRO")
+    os.environ["STRIPE_PRICE_PRO"] = "price_demo_pro_123"
+    try:
+        captured: dict = {}
+
+        class _MockSessions:
+            @staticmethod
+            def create(**kw):
+                captured.update(kw)
+                return {"id": "cs_demo_abc",
+                        "url": "https://checkout.stripe.com/pay/cs_demo_abc"}
+
+        class _MockClient:
+            class checkout:
+                Session = _MockSessions
+
+        class _U:
+            id = "user-9"
+            email = "u@x.com"
+
+        out = B.create_checkout_session(_U(), "pro", client=_MockClient)
+        checkout = {
+            "returned": out,
+            "mode": captured.get("mode"),
+            "line_items": captured.get("line_items"),
+            "client_reference_id": captured.get("client_reference_id"),
+            "metadata": captured.get("metadata"),
+        }
+    finally:
+        if prev_price is None:
+            os.environ.pop("STRIPE_PRICE_PRO", None)
+        else:
+            os.environ["STRIPE_PRICE_PRO"] = prev_price
+
+    return {"plans": plans,
+            "metering": {"free_limit": free_limit, "free_blocked": free_blocked,
+                         "pro_within_quota_at_free_limit": pro_ok_at_free_limit},
+            "webhook": webhook,
+            "checkout": checkout}
+
+
+@app.get("/billing")
+def billing_report():
+    """Payments & SaaS mechanics (Part 34): plans, quota gate, webhook, checkout.
+
+    Read-only exercise of dealfinder/billing.py: the free (25/mo) and pro
+    (1000/mo) plans, the meter_usage quota gate blocking the 26th free search,
+    the Stripe webhook verifier (good sig → Entitlement, bad/wrong-secret →
+    rejected, other event → ignored), and the Checkout session builder against a
+    mock client. Deterministic, offline, cached — no live Stripe, no network."""
+    return _billing_report()
+
+
+@lru_cache(maxsize=1)
 def _inference_report() -> dict:
     """Assemble the four inference-optimization levers — Part 27. Cached, offline."""
     from . import inference as inf
