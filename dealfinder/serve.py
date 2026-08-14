@@ -338,6 +338,94 @@ def ops_report():
 
 
 @lru_cache(maxsize=1)
+def _auth_report() -> dict:
+    """Drive the canonical Supabase-JWT scenarios through auth.py — Part 32. Cached, offline.
+
+    Mints HS256 tokens with a throwaway demo secret (never the learner's real
+    SUPABASE_JWT_SECRET) and runs each through the real verifier, so every verdict
+    below is produced by dealfinder/auth.py — not hard-coded."""
+    import time
+
+    import jwt
+
+    from . import auth as A
+
+    demo_secret = "demo-inspector-secret-not-supabase"
+    now = int(time.time())
+
+    def _mint(secret=demo_secret, *, sub="user-123", email="a@b.com",
+              role="free", exp_delta=3600, drop_sub=False):
+        claims = {
+            "sub": sub, "email": email, "aud": A._AUDIENCE,
+            "iat": now, "exp": now + exp_delta,
+            "app_metadata": {"plan": role},
+        }
+        if drop_sub:
+            claims.pop("sub")
+        return jwt.encode(claims, secret, algorithm=A._ALGO)
+
+    def _verify(token, need_role=None):
+        """Run the exact require_user / require_role logic, minus the HTTP layer."""
+        prev = os.environ.get("SUPABASE_JWT_SECRET")
+        os.environ["SUPABASE_JWT_SECRET"] = demo_secret
+        try:
+            claims = A._decode(token)  # HS256 signature + expiry + audience
+            sub = claims.get("sub")
+            if not sub:
+                raise HTTPException(status_code=401, detail="token missing subject")
+            user = A.User(id=sub, email=claims.get("email"), role=A._role_from_claims(claims))
+            if need_role and user.role != need_role:
+                raise HTTPException(status_code=403, detail=f"requires role '{need_role}'")
+            return {"status": 200, "user": {"id": user.id, "email": user.email, "role": user.role}}
+        except HTTPException as exc:
+            return {"status": exc.status_code, "detail": exc.detail}
+        finally:
+            if prev is None:
+                os.environ.pop("SUPABASE_JWT_SECRET", None)
+            else:
+                os.environ["SUPABASE_JWT_SECRET"] = prev
+
+    tampered = _mint()
+    tampered = tampered[:-3] + ("aaa" if tampered[-3:] != "aaa" else "bbb")
+
+    return {
+        "algo": A._ALGO,
+        "audience": A._AUDIENCE,
+        "secret_source": "SUPABASE_JWT_SECRET (a throwaway demo secret is used here, never your real one)",
+        "scenarios": [
+            {"name": "valid · pro", "note": "well-formed token, app_metadata.plan=pro",
+             "result": _verify(_mint(sub="u1", email="pro@x.com", role="pro"))},
+            {"name": "valid · free", "note": "well-formed token, default plan",
+             "result": _verify(_mint(sub="u2", email="free@x.com", role="free"))},
+            {"name": "expired", "note": "exp 10s in the past",
+             "result": _verify(_mint(exp_delta=-10))},
+            {"name": "tampered", "note": "last 3 signature chars flipped",
+             "result": _verify(tampered)},
+            {"name": "wrong secret", "note": "signed with a different secret",
+             "result": _verify(_mint(secret="some-other-secret"))},
+            {"name": "missing subject", "note": "no sub claim",
+             "result": _verify(_mint(drop_sub=True))},
+            {"name": "role gate: free → /pro", "note": "require_role('pro') on a free user",
+             "result": _verify(_mint(role="free"), need_role="pro")},
+            {"name": "role gate: pro → /pro", "note": "require_role('pro') on a pro user",
+             "result": _verify(_mint(role="pro"), need_role="pro")},
+        ],
+    }
+
+
+@app.get("/auth")
+def auth_report():
+    """Auth & accounts (Part 32): every JWT verdict, made visible.
+
+    Drives canonical Supabase-style tokens — valid pro/free, expired, tampered,
+    wrong-secret, missing-subject, and the free/pro role gate — through the real
+    dealfinder/auth.py verifier: 200 with a User, 401 for bad tokens, 403 for a
+    valid token lacking the role. Deterministic, offline, cached — uses a
+    throwaway demo secret, never your SUPABASE_JWT_SECRET."""
+    return _auth_report()
+
+
+@lru_cache(maxsize=1)
 def _inference_report() -> dict:
     """Assemble the four inference-optimization levers — Part 27. Cached, offline."""
     from . import inference as inf

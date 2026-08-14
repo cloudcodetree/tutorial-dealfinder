@@ -60,6 +60,7 @@
       <label><input type="radio" name="mode" value="safety"> safety (sec)</label>
       <label><input type="radio" name="mode" value="inference"> inference (perf)</label>
       <label><input type="radio" name="mode" value="ops"> ops (cost)</label>
+      <label><input type="radio" name="mode" value="auth"> auth (SaaS)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -519,6 +520,31 @@ function inferencePanel(d) {
 
 // Render the ops utilities (Part 30): FinOps cost attribution per model, the budget
 // alert thresholds, and PSI drift detection across three scenarios.
+function authPanel(d) {
+  // Colour each verdict by HTTP status: 200 pass (green), 401 reject (red), 403 forbid (amber).
+  const SC = (s) => s === 200 ? "#3fb950" : s === 403 ? "#f0a30a" : "#f85149";
+  const verdict = (res) => {
+    const detail = res.user
+      ? `${esc(res.user.role)} · ${esc(res.user.email)}`
+      : esc(res.detail);
+    return `<span style="color:${SC(res.status)};font-weight:700;font-family:ui-monospace,Menlo,monospace">${res.status}</span>
+      <span style="color:#8b98a8">${detail}</span>`;
+  };
+  const row = (s) => `<div style="display:flex;gap:12px;align-items:baseline;padding:6px 0;border-top:1px solid #1a212b">
+      <span style="width:190px;color:#e6edf3;font-size:13px">${esc(s.name)}</span>
+      <span style="flex:1;min-width:230px">${verdict(s.result)}</span>
+      <span style="color:var(--mut);font-size:12px">${esc(s.note)}</span></div>`;
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    <div class="row" style="margin:0 0 8px;gap:8px">
+      ${chip("#3fb950", "200 verified")} ${chip("#f85149", "401 rejected")} ${chip("#f0a30a", "403 forbidden")}
+    </div>
+    <div style="font-size:12px;color:#8b98a8;margin:0 0 6px">Every row is a Supabase-style HS256 token run through the real <code>auth.py</code> verifier (<b>${esc(d.algo)}</b>, aud <b>${esc(d.audience)}</b>). A throwaway demo secret is used here — never your <code>SUPABASE_JWT_SECRET</code>.</div>
+    ${d.scenarios.map(row).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">Two valid tokens resolve to a <b>User</b> with the plan read from <code>app_metadata</code>. Every bad token — expired, tampered, wrong secret, no subject — is a <b style="color:#f85149">401</b> ("we don't know who you are"). A valid free-tier token hitting a pro route is a <b style="color:#f0a30a">403</b> ("we know you, you lack the role"). Verify locally, no network round-trip.</div>
+  </div>`;
+}
+
 function opsPanel(d) {
   const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
   const c = d.cost, maxCost = Math.max(...Object.values(c.by_model));
@@ -571,8 +597,20 @@ async function run(q) {
     : m === "safety" ? "running untrusted text through every guardrail layer…"
     : m === "inference" ? "measuring the inference-optimization levers — cache, batching, GPU refs…"
     : m === "ops" ? "running the ops utilities — cost attribution, budget, drift…"
+    : m === "auth" ? "verifying Supabase JWTs — valid, expired, tampered, wrong secret, role gate…"
     : "searching live sources…";
   try {
+    if (m === "auth") {
+      const r = await fetch("/auth");
+      const d = await r.json();
+      const ok = d.scenarios.filter(s => s.result.status === 200).length;
+      const rejected = d.scenarios.filter(s => s.result.status === 401).length;
+      const forbidden = d.scenarios.filter(s => s.result.status === 403).length;
+      $("meta").textContent = `${d.algo} · ${ok} verified · ${rejected} rejected (401) · ${forbidden} forbidden (403)`;
+      $("grid").innerHTML = authPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "ops") {
       const r = await fetch("/ops");
       const d = await r.json();
@@ -728,7 +766,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
