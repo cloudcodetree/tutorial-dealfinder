@@ -63,6 +63,7 @@
       <label><input type="radio" name="mode" value="auth"> auth (SaaS)</label>
       <label><input type="radio" name="mode" value="suggestions"> suggestions (worker)</label>
       <label><input type="radio" name="mode" value="billing"> billing (Stripe)</label>
+      <label><input type="radio" name="mode" value="compliance"> compliance (sec)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -522,6 +523,38 @@ function inferencePanel(d) {
 
 // Render the ops utilities (Part 30): FinOps cost attribution per model, the budget
 // alert thresholds, and PSI drift detection across three scenarios.
+function compliancePanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const head = (t) => `<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">${esc(t)}</div>`;
+  // rate limit: a strip of allow/block pills
+  const rl = d.rate_limit;
+  const pill = (x) => `<span class="src" style="color:${x.allowed?"#3fb950":"#f85149"};border-color:${(x.allowed?"#3fb950":"#f85149")}66">t=${esc(x.t)} ${x.allowed?"allow":"BLOCK"}</span>`;
+  // gdpr audit
+  const g = d.gdpr;
+  const auditRow = (e) => `<div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#b7c2cf;padding:2px 0">▸ ${esc(e.action)} · user ${esc(e.user_id)} · count ${esc(e.count)}</div>`;
+  // abuse
+  const a = d.abuse;
+  const abuseRow = (label, res) => `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:13px">
+      <span style="width:150px;color:#e6edf3">${esc(label)}</span>
+      ${res.flagged ? chip("#f85149","FLAGGED") : chip("#3fb950","clean")}
+      <span style="color:var(--mut);font-size:12px">${esc(res.reasons.join("; ") || "no thresholds tripped")}</span></div>`;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    <div style="font-size:12px;color:#8b98a8;margin:0 0 4px">The at-scale guardrails in <code>compliance.py</code> — which <b>extends</b> Part 25's <code>safety.py</code> (reuses its <code>AuditLog</code> + injection detector, no reimplementation). All over an injected clock, fully deterministic.</div>
+    ${head("Sliding-window rate limit — 3 requests / 10s, per user")}
+    <div class="row" style="gap:6px">${rl.decisions.map(pill).join("")}</div>
+    <div style="font-size:12px;color:#8b98a8;margin-top:4px">First 3 pass, next 2 blocked inside the window. At <b>t=10</b> the window slides past t=0 → <b style="color:#3fb950">allowed again</b> (${esc(rl.after_slide.remaining)} remaining). A true sliding window, not a fixed bucket.</div>
+    ${head("GDPR data-subject requests — export + erase, audited")}
+    <div style="font-size:13px;color:#e6edf3;padding:2px 0">Export (SAR) returned <b>${esc(g.exported_count)}</b> records for u1 · Delete (erasure) removed <b>${esc(g.deleted_count)}</b> → u1 now holds <b>${esc(g.u1_after_delete)}</b>, u2 untouched (<b>${esc(g.u2_untouched)}</b>).</div>
+    <div style="margin-top:4px">${g.audit.map(auditRow).join("")}</div>
+    <div style="font-size:12px;color:#8b98a8;margin-top:2px">Every action leaves a trail in Part 25's <code>AuditLog</code> — the compliance evidence a regulator asks for.</div>
+    ${head("Abuse detection — velocity + repeated injection")}
+    ${abuseRow("injection burst", a.injection_burst)}
+    ${abuseRow("velocity burst", a.velocity_burst)}
+    ${abuseRow("normal use", a.normal_use)}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">Part 25 asks "is THIS request an injection?"; this asks "is this USER, across many requests, abusing the system?" Four injection attempts trip the injection threshold; six fast requests trip velocity; well-paced benign traffic trips neither.</div>
+  </div>`;
+}
+
 function billingPanel(d) {
   const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
   const head = (t) => `<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">${esc(t)}</div>`;
@@ -667,8 +700,19 @@ async function run(q) {
     : m === "auth" ? "verifying Supabase JWTs — valid, expired, tampered, wrong secret, role gate…"
     : m === "suggestions" ? "running the saved-search worker — search, diff against last-seen, notify only new deals…"
     : m === "billing" ? "exercising billing.py — plans, quota gate, Stripe webhook verification, checkout builder…"
+    : m === "compliance" ? "exercising compliance.py — rate limiter, GDPR export/erase, abuse detection…"
     : "searching live sources…";
   try {
+    if (m === "compliance") {
+      const r = await fetch("/compliance");
+      const d = await r.json();
+      const allowed = d.rate_limit.decisions.filter(x => x.allowed).length;
+      const flagged = ["injection_burst","velocity_burst"].filter(k => d.abuse[k].flagged).length;
+      $("meta").textContent = `rate-limit ${allowed}/${d.rate_limit.decisions.length} allowed · GDPR export ${d.gdpr.exported_count} / erase ${d.gdpr.deleted_count} · abuse ${flagged}/2 bursts flagged`;
+      $("grid").innerHTML = compliancePanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "billing") {
       const r = await fetch("/billing");
       const d = await r.json();
@@ -853,7 +897,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth","suggestions","billing"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth","suggestions","billing","compliance"].includes(mode())) run(q); });
 </script>
 </body>
 </html>

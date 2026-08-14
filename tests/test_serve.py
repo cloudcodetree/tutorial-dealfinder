@@ -270,3 +270,24 @@ def test_billing_endpoint_reports_plans_quota_webhook_and_checkout():
     assert c["line_items"] == [{"price": "price_demo_pro_123", "quantity": 1}]
     assert c["metadata"] == {"user_id": "user-9", "plan": "pro"}
     assert c["returned"]["id"] == "cs_demo_abc"
+
+
+def test_compliance_endpoint_reports_ratelimit_gdpr_and_abuse():
+    # Part 35 surface: the at-scale guardrails from compliance.py.
+    r = client.get("/compliance")
+    assert r.status_code == 200
+    b = r.json()
+    # rate limiter: limit 3 / 10s → allow,allow,allow,block,block; slide re-allows.
+    assert [x["allowed"] for x in b["rate_limit"]["decisions"]] == [True, True, True, False, False]
+    assert b["rate_limit"]["after_slide"]["allowed"] is True
+    # GDPR: export 2, delete 2, u1 emptied, u2 untouched, audited (export then delete).
+    g = b["gdpr"]
+    assert g["exported_count"] == 2 and g["deleted_count"] == 2
+    assert g["u1_after_delete"] == 0 and g["u2_untouched"] == 1
+    assert [e["action"] for e in g["audit"]] == ["gdpr_export", "gdpr_delete"]
+    # abuse: injection burst and velocity burst flagged; normal use is not.
+    assert b["abuse"]["injection_burst"]["flagged"] is True
+    assert any("injection" in x for x in b["abuse"]["injection_burst"]["reasons"])
+    assert b["abuse"]["velocity_burst"]["flagged"] is True
+    assert any("velocity" in x for x in b["abuse"]["velocity_burst"]["reasons"])
+    assert b["abuse"]["normal_use"]["flagged"] is False
