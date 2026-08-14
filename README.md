@@ -36,6 +36,37 @@ Work through it **version by version** — each step is a git tag:
 git checkout step-02   # then step-03, step-04, …
 ```
 
+## Run the whole stack in one command (Docker Compose)
+
+For a transportable dev environment — no host Python/Node/pnpm, just Docker —
+`docker-compose.yml` brings up the three services together with live reload:
+
+| Service    | URL                     | What it is                                   |
+|------------|-------------------------|----------------------------------------------|
+| `db`       | `localhost:5434`        | Postgres + pgvector (named volume `pgdata`)  |
+| `backend`  | http://localhost:8000   | FastAPI aggregator + all `/endpoint` inspectors (`uvicorn --reload`) |
+| `frontend` | http://localhost:5173   | Vite + React SPA (HMR; proxies the API to `backend`) |
+
+```bash
+cp .env.example .env                    # optional: add live-source / Supabase / Stripe keys
+docker compose up                       # start db + backend + frontend
+docker compose --profile seed up seed   # one-shot: populate pgvector from the 270-item snapshot
+docker compose down                     # stop  (add -v to also delete the pgvector volume)
+```
+
+- **Live editing:** `./dealfinder` and `./frontend` are bind-mounted — edit a `.py`
+  and uvicorn reloads; edit a `.tsx` and Vite hot-swaps it. No rebuild.
+- **No keys needed:** without `.env`, live search falls back to the frozen snapshot
+  and the auth/billing inspectors use throwaway demo secrets. Add keys to `.env`
+  (and set `DEALFINDER_ENABLE_PAID_SOURCES=1`) to hit live sources.
+- **"By meaning" search:** empty pgvector falls back to snapshot retrieval; run the
+  `seed` profile once to populate it with real embeddings.
+- This supersedes running `uvicorn` / `vite` / a standalone pgvector container by hand.
+- No `docker compose` plugin? The standalone `docker-compose <same args>` binary works too.
+- **Memory:** the `/healthz`, `/endpoint` inspectors, and the `seed` profile run fine
+  on a small (2 GB) Docker VM. *Live* semantic search loads the embedding model in the
+  backend — give the VM ≥ 4 GB for that (`colima start --memory 4`) to avoid an OOM.
+
 ## Steps (and what each adds)
 
 | Step | What you add |

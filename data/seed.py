@@ -5,7 +5,7 @@ Loads every snapshot product and its committed 384-dim bge-small title vector
 by meaning against a real HNSW index. Idempotent — `upsert` uses ON CONFLICT,
 so re-running updates rows in place instead of duplicating them.
 
-    DATABASE_URL=postgresql://postgres:...@localhost:5433/dealfinder python data/seed.py
+    DATABASE_URL=postgresql://dealfinder:dealfinder@localhost:5434/dealfinder python data/seed.py
 """
 from __future__ import annotations
 

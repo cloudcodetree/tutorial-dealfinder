@@ -1,0 +1,20 @@
+# DealFinder DEV image — for docker-compose only.
+#
+# Editable install (`pip install -e .`) so `uvicorn --reload` picks up live edits
+# to the source that docker-compose mounts over /app at runtime. The PRODUCTION
+# image is the sibling `Dockerfile` (baked, no reload, test_deploy guards its CMD);
+# this one deliberately trades that immutability for a fast edit→reload loop.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Build-time install of the project + its dependencies. At runtime the compose
+# service bind-mounts ./ over /app, so the installed deps (in site-packages) and
+# the editable finder stay, while the package source under /app/dealfinder is live.
+COPY . .
+RUN pip install --no-cache-dir -e .
+
+EXPOSE 8000
+
+# Overridden by compose for the `seed` one-shot; this is the default (the API).
+CMD ["uvicorn", "dealfinder.serve:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

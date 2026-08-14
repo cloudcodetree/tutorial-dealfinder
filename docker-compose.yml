@@ -1,0 +1,89 @@
+# Transportable DealFinder dev stack — pgvector + FastAPI backend + Vite SPA.
+#
+#   docker compose up                     # start db + backend + frontend (hot-reload)
+#   docker compose --profile seed up seed # one-shot: populate pgvector from the snapshot
+#   docker compose down                   # stop; add -v to also wipe the pgvector volume
+#
+# (On hosts without the `docker compose` plugin, the standalone `docker-compose`
+#  binary works identically.)
+#
+# Live editing: ./dealfinder and ./frontend are bind-mounted, so a .py edit
+# reloads uvicorn and a .tsx edit triggers Vite HMR — no rebuild.
+name: dealfinder
+
+services:
+  db:
+    image: pgvector/pgvector:0.7.0-pg16
+    environment:
+      POSTGRES_DB: dealfinder
+      # Dev-only, localhost-only credentials — this DB is bound to 127.0.0.1
+      # below and holds only the public snapshot. Do not reuse these anywhere real.
+      POSTGRES_USER: dealfinder
+      POSTGRES_PASSWORD: dealfinder
+    ports:
+      - "127.0.0.1:5434:5432"   # localhost only (not the LAN); same port as before
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealfinder -d dealfinder"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The compose value wins over any DATABASE_URL in .env, so the container
+      # always talks to the `db` service (not the host).
+      DATABASE_URL: postgresql://dealfinder:dealfinder@db:5432/dealfinder
+      DEALFINDER_ENABLE_PAID_SOURCES: "0"   # free-tier default; flip in .env to enable
+    env_file:
+      - path: .env          # your live-source / Supabase / Stripe keys (optional)
+        required: false     # works without it: snapshot fallback + demo secrets
+    ports:
+      # localhost only: a dev server with a source bind-mount + --reload must not
+      # be reachable from the network.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./:/app             # live source; deps live in the image's site-packages
+    command: uvicorn dealfinder.serve:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - backend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    ports:
+      - "127.0.0.1:5173:5173"   # localhost only
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules   # keep the image's Linux node_modules (named volume)
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
+  # One-shot seeder: migrate the schema + upsert the 270-item snapshot embeddings
+  # so "by meaning" search is populated immediately. Runs the canonical data/seed.py
+  # (Part-4 cached embeddings, no model run). Only runs under --profile seed.
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles: ["seed"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://dealfinder:dealfinder@db:5432/dealfinder
+    volumes:
+      - ./:/app
+    command: python data/seed.py
+
+volumes:
+  pgdata:

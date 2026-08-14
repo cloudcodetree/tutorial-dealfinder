@@ -11,7 +11,7 @@ tofu destroy              # tear it all down
 ```
 
 `tofu output -raw database_url` prints the connection string
-(`postgresql://dealfinder:dealfinder@localhost:5433/dealfinder`).
+(`postgresql://dealfinder:dealfinder@localhost:5434/dealfinder`).
 
 ## Colima / non-default Docker socket
 

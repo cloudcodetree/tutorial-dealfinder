@@ -1,0 +1,16 @@
+# Keep the frontend build context (and image layers) lean and secret-free.
+# node_modules is reinstalled via `npm ci` in Dockerfile.dev and overridden by a
+# named volume at runtime, so it must never be COPYed into the image.
+node_modules
+dist
+.vite
+
+# Never bake secrets into an image layer. .env.example is a template, but the
+# image doesn't need it either — exclude the whole family.
+.env
+.env.*
+
+# Test/build artifacts (generated locally, not part of the image).
+playwright-report
+test-results
+*.log
