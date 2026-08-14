@@ -224,3 +224,24 @@ def test_auth_endpoint_reports_every_jwt_verdict():
     assert by_name["missing subject"] == {"status": 401, "detail": "token missing subject"}
     assert by_name["role gate: free → /pro"] == {"status": 403, "detail": "requires role 'pro'"}
     assert by_name["role gate: pro → /pro"]["status"] == 200
+
+
+def test_suggestions_endpoint_reports_the_diff_loop():
+    # Part 33 surface: the suggestions worker's three canonical runs.
+    r = client.get("/suggestions")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["threshold"] == 0.3
+    runs = b["runs"]
+    assert len(runs) == 3
+    # run 1: exactly one notification, the Anker Soundcore Q20i hero deal.
+    n1 = runs[0]["notifications"]
+    assert len(n1) == 1
+    assert "Anker Soundcore Q20i" in n1[0]["title"]
+    assert n1[0]["price"] == 44.99 and n1[0]["deal_score"] == 0.7239
+    # run 2: idempotent — same state fed back, nothing fires.
+    assert runs[1]["notifications"] == []
+    # run 3: adding a new saved search fires exactly one new deal.
+    n3 = runs[2]["notifications"]
+    assert len(n3) == 1 and n3[0]["query"] == "bluetooth speaker"
+    assert n3[0]["deal_score"] >= 0.30

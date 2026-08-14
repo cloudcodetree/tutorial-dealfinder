@@ -426,6 +426,55 @@ def auth_report():
 
 
 @lru_cache(maxsize=1)
+def _suggestions_report() -> dict:
+    """Run the real suggestions worker over the snapshot — Part 33. Cached, offline.
+
+    Three runs of run_suggestions() prove the diff loop: (1) a saved search fires
+    for the first time and notifies the Anker hero deal, (2) the same state fed
+    back emits nothing (idempotent), (3) the user adds a second saved search and
+    exactly one new deal fires. Every notification below is produced by the real
+    dealfinder/worker.py against the frozen snapshot — nothing hard-coded."""
+    from .worker import (
+        SavedSearch, SuggestionState, load_catalog as _load_cat, run_suggestions,
+    )
+
+    cat = _load_cat()
+    hp = SavedSearch(user_id="u1", query="noise cancelling headphones", k=5)
+    sp = SavedSearch(user_id="u1", query="bluetooth speaker", k=1)
+
+    def _fmt(notes):
+        return [{"query": n.query, "item_id": n.item_id, "title": n.title,
+                 "price": n.price, "deal_score": round(n.deal_score, 4)} for n in notes]
+
+    run1, s1 = run_suggestions([hp], SuggestionState(), catalog=cat)
+    run2, _ = run_suggestions([hp], s1, catalog=cat)        # same state → idempotent
+    run3, _ = run_suggestions([hp, sp], s1, catalog=cat)    # new saved search → 1 new
+
+    return {
+        "threshold": 0.30,
+        "runs": [
+            {"label": "run 1 · saved search fires for the first time",
+             "saved": ["noise cancelling headphones"], "notifications": _fmt(run1)},
+            {"label": "run 2 · same state fed back",
+             "saved": ["noise cancelling headphones"], "notifications": _fmt(run2)},
+            {"label": "run 3 · user adds “bluetooth speaker” (k=1)",
+             "saved": ["noise cancelling headphones", "bluetooth speaker"], "notifications": _fmt(run3)},
+        ],
+    }
+
+
+@app.get("/suggestions")
+def suggestions_report():
+    """Saved searches & the suggestions worker (Part 33): the diff loop, made visible.
+
+    Runs dealfinder/worker.py's run_suggestions over the snapshot three times:
+    first fire → the Anker Soundcore Q20i deal ($44.99, score 0.7239); the same
+    state fed back → zero (idempotent); a newly-added 'bluetooth speaker' saved
+    search → exactly one new notification. Deterministic, offline, cached."""
+    return _suggestions_report()
+
+
+@lru_cache(maxsize=1)
 def _inference_report() -> dict:
     """Assemble the four inference-optimization levers — Part 27. Cached, offline."""
     from . import inference as inf

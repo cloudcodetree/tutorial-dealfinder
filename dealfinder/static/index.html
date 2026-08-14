@@ -61,6 +61,7 @@
       <label><input type="radio" name="mode" value="inference"> inference (perf)</label>
       <label><input type="radio" name="mode" value="ops"> ops (cost)</label>
       <label><input type="radio" name="mode" value="auth"> auth (SaaS)</label>
+      <label><input type="radio" name="mode" value="suggestions"> suggestions (worker)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -520,6 +521,33 @@ function inferencePanel(d) {
 
 // Render the ops utilities (Part 30): FinOps cost attribution per model, the budget
 // alert thresholds, and PSI drift detection across three scenarios.
+function suggestionsPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const note = (n) => `<div style="display:flex;gap:10px;align-items:baseline;padding:4px 0">
+      <span style="color:#3fb950;font-weight:700">✓ deal</span>
+      <span style="flex:1;color:#e6edf3;font-size:13px">${esc(n.title.slice(0,52))}</span>
+      <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px">$${esc(n.price)} · score ${esc(n.deal_score)}</span></div>`;
+  const runBlock = (r, i) => {
+    const fired = r.notifications.length;
+    const badge = fired ? chip("#3fb950", `${fired} notification${fired>1?"s":""}`) : chip("#8b98a8", "0 — nothing new");
+    const body = fired
+      ? r.notifications.map(note).join("")
+      : `<div style="color:#8b98a8;font-size:13px;padding:4px 0">Every deal here was already notified — the diff skips it. Idempotent.</div>`;
+    return `<div style="padding:10px 0;border-top:1px solid #1a212b">
+        <div class="row" style="gap:8px;margin-bottom:4px">
+          <span style="color:var(--mut);font-size:12px">${esc(r.label)}</span> ${badge}
+        </div>
+        <div style="font-size:11px;color:#6b7684;margin-bottom:4px">saved: ${r.saved.map(q=>`<code>${esc(q)}</code>`).join(" · ")}</div>
+        ${body}
+      </div>`;
+  };
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:900px">
+    <div style="font-size:12px;color:#8b98a8;margin:0 0 6px">The real <code>run_suggestions()</code> over the frozen snapshot. A deal must clear a blended two-signal score of <b>${esc(d.threshold)}</b> to notify; each run diffs against last-seen state and fires only <b>new</b> deals.</div>
+    ${d.runs.map(runBlock).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">This is every price-tracker's "we found you a deal" email — minus the email. Run 1 surfaces the honest <b>Anker Soundcore Q20i</b> ($44.99, 72% under the $162.97 median). Run 2 proves it never double-notifies. Run 3 shows a newly-saved search firing exactly one fresh deal. Delivery sits behind a <code>Notifier</code> seam — swap in email/push without touching the diff.</div>
+  </div>`;
+}
+
 function authPanel(d) {
   // Colour each verdict by HTTP status: 200 pass (green), 401 reject (red), 403 forbid (amber).
   const SC = (s) => s === 200 ? "#3fb950" : s === 403 ? "#f0a30a" : "#f85149";
@@ -598,8 +626,18 @@ async function run(q) {
     : m === "inference" ? "measuring the inference-optimization levers — cache, batching, GPU refs…"
     : m === "ops" ? "running the ops utilities — cost attribution, budget, drift…"
     : m === "auth" ? "verifying Supabase JWTs — valid, expired, tampered, wrong secret, role gate…"
+    : m === "suggestions" ? "running the saved-search worker — search, diff against last-seen, notify only new deals…"
     : "searching live sources…";
   try {
+    if (m === "suggestions") {
+      const r = await fetch("/suggestions");
+      const d = await r.json();
+      const fired = d.runs.map(x => x.notifications.length);
+      $("meta").textContent = `run 1 → ${fired[0]} new · run 2 → ${fired[1]} (idempotent) · run 3 → ${fired[2]} new · threshold ${d.threshold}`;
+      $("grid").innerHTML = suggestionsPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "auth") {
       const r = await fetch("/auth");
       const d = await r.json();
@@ -766,7 +804,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops","auth","suggestions"].includes(mode())) run(q); });
 </script>
 </body>
 </html>
