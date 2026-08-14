@@ -302,6 +302,42 @@ def context_window(q: str, budget: int = 256, k: int = 20):
 
 
 @lru_cache(maxsize=1)
+def _ops_report() -> dict:
+    """Run the canonical FinOps + drift examples through ops.py — Part 30. Cached."""
+    from . import ops
+    t = ops.CostTracker()
+    t.record("gpt-4o-mini", 1000, 500)   # deal scoring
+    t.record("gpt-4o", 1000, 0)          # extraction
+    ref = [50, 30, 20]
+    scenarios = {"identical": [50, 30, 20], "tiny": [49, 31, 20], "big": [10, 30, 60]}
+    return {
+        "cost": {
+            "calls": t.calls,
+            "total": round(t.total(), 5),
+            "by_model": {k: round(v, 5) for k, v in t.by_model().items()},
+        },
+        "budget": {str(s): ops.budget_status(s, 1.0) for s in (0.5, 0.85, 1.2)},
+        "drift": {
+            name: {"psi": round(ops.population_stability_index(ref, cur), 5),
+                   "drifted": ops.has_drifted(ref, cur)}
+            for name, cur in scenarios.items()
+        },
+        "drift_threshold": 0.2,
+    }
+
+
+@app.get("/ops")
+def ops_report():
+    """Observability, cost & ops (Part 30): FinOps + drift, made visible.
+
+    Returns the CostTracker session (per-model spend attribution + total), the
+    budget-status thresholds (ok/warn/over), and the PSI drift scenarios (identical
+    0.0, tiny 0.00053 → no drift, big 1.08322 → drift, vs the 0.2 threshold).
+    Deterministic, offline, cached."""
+    return _ops_report()
+
+
+@lru_cache(maxsize=1)
 def _inference_report() -> dict:
     """Assemble the four inference-optimization levers — Part 27. Cached, offline."""
     from . import inference as inf

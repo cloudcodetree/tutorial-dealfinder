@@ -59,6 +59,7 @@
       <label><input type="radio" name="mode" value="mlops"> mlops (ML)</label>
       <label><input type="radio" name="mode" value="safety"> safety (sec)</label>
       <label><input type="radio" name="mode" value="inference"> inference (perf)</label>
+      <label><input type="radio" name="mode" value="ops"> ops (cost)</label>
     </div>
     <div id="trapRow" style="display:none;margin:0 2px 8px;font-size:12px;color:var(--mut);font-family:ui-monospace,Menlo,monospace">
       <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
@@ -516,6 +517,44 @@ function inferencePanel(d) {
   </div>`;
 }
 
+// Render the ops utilities (Part 30): FinOps cost attribution per model, the budget
+// alert thresholds, and PSI drift detection across three scenarios.
+function opsPanel(d) {
+  const chip = (color, label) => `<span class="vbadge" style="color:${color};border-color:${color}66;background:${color}22">${esc(label)}</span>`;
+  const c = d.cost, maxCost = Math.max(...Object.values(c.by_model));
+  const costRow = (model, cost) => {
+    const pct = Math.round(cost / c.total * 100);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+      <span style="width:110px;color:#e6edf3;font-size:13px">${esc(model)}</span>
+      <div style="flex:1;background:#0b0f14;border-radius:5px;overflow:hidden;height:18px;border:1px solid var(--line)">
+        <div style="height:100%;width:${(cost/maxCost*100).toFixed(0)}%;background:${model==='gpt-4o'?'#f0a30a':'#58a6ff'}55;border-right:2px solid ${model==='gpt-4o'?'#f0a30a':'#58a6ff'}"></div>
+      </div>
+      <span style="width:130px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-size:12px">$${esc(cost.toFixed(5))} · ${esc(pct)}%</span>
+    </div>`;
+  };
+  const BC = { ok:"#3fb950", warn:"#f0a30a", over:"#f0a30a" };
+  const budgetCell = (frac, status) => `<span class="src" style="color:${BC[status]};border-color:${BC[status]}66">${esc(Math.round(frac*100))}% → ${esc(status)}</span>`;
+  const DC = (drifted) => drifted ? "#f0a30a" : "#3fb950";
+  const driftRow = (name, o) => `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:13px">
+      <span style="width:78px;color:var(--mut)">${esc(name)}</span>
+      <span style="width:150px;font-family:ui-monospace,Menlo,monospace">PSI ${esc(o.psi)}</span>
+      <span style="color:${DC(o.drifted)};font-weight:600">${o.drifted ? "✗ DRIFT — retrain" : "✓ hold"}</span></div>`;
+  return `<div class="card" style="grid-column:1 / -1;display:block;padding:18px 22px;max-width:880px">
+    <div class="row" style="margin:0 0 4px;gap:8px">
+      ${chip("#58a6ff", "cost attribution")} ${chip("#f0a30a", "budget alerts")} ${chip("#3fb950", "drift → retrain")}
+    </div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 2px">FinOps · spend per model this session</div>
+    ${Object.entries(c.by_model).map(([m,v])=>costRow(m,v)).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:4px">Session total <b style="color:#e6edf3">$${esc(c.total.toFixed(5))}</b> — <b style="color:#f0a30a">gpt-4o</b> (extraction) drives ${esc(Math.round(c.by_model["gpt-4o"]/c.total*100))}% of spend. That's the actionable signal: cache it, batch it, or route simple titles to the mini model.</div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Budget alert thresholds (vs \$1.00 budget)</div>
+    <div class="row" style="gap:8px">${Object.entries(d.budget).map(([f,s])=>budgetCell(parseFloat(f),s)).join("")}</div>
+    <div style="font-size:12px;color:#8b98a8;margin-top:4px"><b style="color:#f0a30a">warn</b> is the actionable window — it pages before the invoice lands; <b>over</b> means you already overran.</div>
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 4px">Population stability index · query-mix drift (threshold ${esc(d.drift_threshold)})</div>
+    ${["identical","tiny","big"].map(n=>driftRow(n, d.drift[n])).join("")}
+    <div style="font-size:12px;color:#8b98a8;margin-top:8px;border-top:1px solid #222a35;padding-top:10px">A live system you can't see is a liability. Attribute every dollar, alert before the bill, and watch the input distribution — audio collapsing from 50% to 10% of traffic (PSI 1.08, 5× the threshold) fires a retrain before deal scores quietly rot.</div>
+  </div>`;
+}
+
 async function run(q) {
   const m = mode();
   $("go").disabled = true; $("grid").innerHTML = ""; $("note").textContent = "";
@@ -531,8 +570,17 @@ async function run(q) {
     : m === "mlops" ? "running the MLOps cycle — drift, retrain, gate, promote…"
     : m === "safety" ? "running untrusted text through every guardrail layer…"
     : m === "inference" ? "measuring the inference-optimization levers — cache, batching, GPU refs…"
+    : m === "ops" ? "running the ops utilities — cost attribution, budget, drift…"
     : "searching live sources…";
   try {
+    if (m === "ops") {
+      const r = await fetch("/ops");
+      const d = await r.json();
+      $("meta").textContent = `session $${d.cost.total.toFixed(5)} · gpt-4o ${Math.round(d.cost.by_model["gpt-4o"]/d.cost.total*100)}% · big-shift PSI ${d.drift.big.psi} → DRIFT`;
+      $("grid").innerHTML = opsPanel(d);
+      $("go").disabled = false;
+      return;
+    }
     if (m === "inference") {
       const r = await fetch("/inference");
       const d = await r.json();
@@ -680,7 +728,7 @@ document.querySelectorAll('input[name=mode]').forEach(r =>
   r.addEventListener("change", () => { $("trapRow").style.display = mode() === "review" ? "block" : "none"; }));
 
 // dataset (ML) mode is query-independent — run it on submit even with an empty box.
-$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference"].includes(mode())) run(q); });
+$("f").addEventListener("submit", (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q || ["dataset","pipeline","models","tracking","evals","mlops","safety","inference","ops"].includes(mode())) run(q); });
 </script>
 </body>
 </html>

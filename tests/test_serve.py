@@ -194,3 +194,15 @@ def test_inference_endpoint_reports_the_four_levers():
     assert b["cache_095"]["near_duplicate_cosine"] == 0.9498
     assert b["batching"]["speedup"] == 16.0 and b["batching"]["illustrative"] is True
     assert len(b["anchored"]) == 2 and all(a["illustrative"] for a in b["anchored"])
+
+
+def test_ops_endpoint_reports_cost_budget_and_drift():
+    # Part 30 surface: FinOps cost attribution, budget thresholds, PSI drift.
+    r = client.get("/ops")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["cost"]["total"] == 0.00295
+    assert b["cost"]["by_model"] == {"gpt-4o-mini": 0.00045, "gpt-4o": 0.0025}
+    assert b["budget"] == {"0.5": "ok", "0.85": "warn", "1.2": "over"}
+    assert b["drift"]["identical"]["psi"] == 0.0 and b["drift"]["identical"]["drifted"] is False
+    assert b["drift"]["big"]["psi"] == 1.08322 and b["drift"]["big"]["drifted"] is True
