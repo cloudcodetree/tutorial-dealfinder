@@ -159,35 +159,35 @@ button{font:inherit;cursor:pointer;}
       <div class="rail-group">
         <h6>Find</h6>
         <button class="rail-item active" data-mode="deals"><span class="bar"></span>Live deals<span class="count" id="dealsCount"></span></button>
-        <button class="rail-item soon">By meaning</button>
-        <button class="rail-item soon">Ask the agent</button>
-        <button class="rail-item soon">Context window</button>
-        <button class="rail-item soon">Writer / reviewer</button>
+        <button class="rail-item" data-mode="semantic"><span class="bar"></span>By meaning</button>
+        <button class="rail-item" data-mode="ask"><span class="bar"></span>Ask the agent</button>
+        <button class="rail-item" data-mode="context"><span class="bar"></span>Context window</button>
+        <button class="rail-item" data-mode="review"><span class="bar"></span>Writer / reviewer</button>
       </div>
       <div class="rail-group">
         <h6>Model</h6>
-        <button class="rail-item soon">Dataset</button>
+        <button class="rail-item" data-mode="dataset"><span class="bar"></span>Dataset</button>
         <button class="rail-item" data-mode="pipeline"><span class="bar"></span>Pipeline</button>
         <button class="rail-item" data-mode="models"><span class="bar"></span>Models</button>
         <button class="rail-item" data-mode="tracking"><span class="bar"></span>Tracking</button>
         <button class="rail-item" data-mode="evals"><span class="bar"></span>Evals</button>
-        <button class="rail-item soon">MLOps loop</button>
+        <button class="rail-item" data-mode="mlops"><span class="bar"></span>MLOps loop</button>
       </div>
       <div class="rail-group">
         <h6>Guard</h6>
-        <button class="rail-item soon">Safety</button>
-        <button class="rail-item soon">Compliance</button>
+        <button class="rail-item" data-mode="safety"><span class="bar"></span>Safety</button>
+        <button class="rail-item" data-mode="compliance"><span class="bar"></span>Compliance</button>
       </div>
       <div class="rail-group">
         <h6>Serve</h6>
-        <button class="rail-item soon">Inference</button>
-        <button class="rail-item soon">Cost &amp; drift</button>
+        <button class="rail-item" data-mode="inference"><span class="bar"></span>Inference</button>
+        <button class="rail-item" data-mode="ops"><span class="bar"></span>Cost &amp; drift</button>
       </div>
       <div class="rail-group">
         <h6>Ship</h6>
-        <button class="rail-item soon">Auth</button>
-        <button class="rail-item soon">Billing</button>
-        <button class="rail-item soon">Saved searches</button>
+        <button class="rail-item" data-mode="auth"><span class="bar"></span>Auth</button>
+        <button class="rail-item" data-mode="billing"><span class="bar"></span>Billing</button>
+        <button class="rail-item" data-mode="suggestions"><span class="bar"></span>Saved searches</button>
       </div>
     </nav>
 
@@ -255,6 +255,35 @@ button{font:inherit;cursor:pointer;}
         <div class="gridcards" id="trackCards"><div class="loading">Loading tracking…</div></div>
         <div id="trackTable" style="margin-top:var(--space-8);"></div>
       </section>
+
+      <!-- BY MEANING (semantic) -->
+      <section id="view-semantic" class="hidden">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Nearest by meaning</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">vector similarity · pgvector</span>
+        </div>
+        <div class="results" id="semResults"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- ASK (RAG) -->
+      <section id="view-ask" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">RAG · grounded answers</h6>
+          <h3>Ask the agent</h3>
+          <p class="muted">Retrieve real listings, then generate an answer grounded in them — live from <span class="mono">/ask</span>.</p>
+        </div>
+        <div id="askBody"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- GENERIC INSPECTOR (dataset/mlops/safety/inference/ops/auth/billing/compliance/review/context/suggestions) -->
+      <section id="view-generic" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 id="genKicker" style="color:var(--color-accent);"></h6>
+          <h3 id="genTitle"></h3>
+          <p class="muted" id="genSub"></p>
+        </div>
+        <div id="genBody"><div class="loading">Loading…</div></div>
+      </section>
     </main>
   </div>
 
@@ -263,7 +292,21 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$" + Number(n).toFixed(2);
 let state = { mode:"deals", q:"noise cancelling headphones" };
-const loaded = { deals:false, pipeline:false, evals:false, models:false, tracking:false };
+const loaded = {};
+const BESPOKE = ['deals','pipeline','evals','models','tracking','semantic','ask'];
+const GENERIC = {
+  context:{ep:'/context',q:true,kicker:'Part 16 · context engineering',title:'The window as a token budget',sub:'What fits and what gets evicted — live from /context.'},
+  review:{ep:'/review',q:true,kicker:'Part 17 · writer / reviewer',title:'Draft, critique, revise',sub:'A second-opinion agent gates the answer — live from /review.'},
+  dataset:{ep:'/dataset',q:false,kicker:'Part 19 · dataset engineering',title:'The labeled training set',sub:'Class balance, weights, leakage-safe split — live from /dataset.'},
+  mlops:{ep:'/mlops',q:false,kicker:'Part 24 · the MLOps loop',title:'Drift → retrain → gate → promote',sub:'The full closed loop — live from /mlops.'},
+  safety:{ep:'/safety',q:false,kicker:'Part 25 · safety & governance',title:'The guardrail stack',sub:'Injection, PII, spec, audit, tool-trust — live from /safety.'},
+  inference:{ep:'/inference',q:false,kicker:'Part 27 · inference optimization',title:'Cache, batch, speed',sub:'The four cost/latency levers — live from /inference.'},
+  ops:{ep:'/ops',q:false,kicker:'Part 30 · cost & drift',title:'FinOps + drift',sub:'Spend, budget, drift — live from /ops.'},
+  auth:{ep:'/auth',q:false,kicker:'Part 32 · auth & accounts',title:'Every JWT verdict',sub:'The real verifier over 8 scenarios — live from /auth.'},
+  suggestions:{ep:'/suggestions',q:true,kicker:'Part 33 · suggestions worker',title:'The saved-search diff loop',sub:'What changed since last run — live from /suggestions.'},
+  billing:{ep:'/billing',q:false,kicker:'Part 34 · payments & SaaS',title:'Plans, quota, webhooks',sub:'Stripe mechanics — live from /billing.'},
+  compliance:{ep:'/compliance',q:false,kicker:'Part 35 · compliance at scale',title:'Rate limit, GDPR, abuse',sub:'The at-scale guardrails — live from /compliance.'},
+};
 
 /* ── mode switching ──────────────────────────────────────────────────── */
 document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{
@@ -272,12 +315,9 @@ document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{
 function setMode(m){
   state.mode = m;
   document.querySelectorAll('.rail-item[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  ['deals','pipeline','evals','models','tracking'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==m));
-  if(m==='deals') loadDeals();
-  if(m==='pipeline') loadPipeline();
-  if(m==='evals') loadEvals();
-  if(m==='models') loadModels();
-  if(m==='tracking') loadTracking();
+  const view = BESPOKE.includes(m) ? m : 'generic';
+  ['deals','pipeline','evals','models','tracking','semantic','ask','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
+  ({deals:loadDeals,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk}[m] || (()=>loadGeneric(m)))();
 }
 
 const mlHint = ep => `<div class="statcard"><div class="k" style="color:var(--color-neutral-500);">unavailable</div><div class="muted" style="font-size:13px;">This mode needs the full-ML profile. Start it with<br><span class="mono" style="font-size:11px;">docker compose -f docker-compose.yml -f docker-compose.full.yml up</span><br>then reopen this mode.</div></div>`;
@@ -313,7 +353,7 @@ async function loadTracking(){
 }
 
 /* ── DEALS (1b) ──────────────────────────────────────────────────────── */
-$('#go').addEventListener('click',()=>{ state.q=$('#q').value.trim()||state.q; loaded.deals=false; loadDeals(); });
+$('#go').addEventListener('click',()=>{ state.q=$('#q').value.trim()||state.q; Object.keys(loaded).forEach(k=>delete loaded[k]); setMode(state.mode); });
 $('#q').addEventListener('keydown',e=>{ if(e.key==='Enter'){$('#go').click();} });
 
 async function loadDeals(){
@@ -442,6 +482,89 @@ async function loadEvals(){
     $('#evalTop').innerHTML = col('two_signal · top 5', d.two_signal.top5, false) + col('median_only · top 5', d.median_only.top5, true);
     $('#evalNote').textContent = `The naive ranker's top-5 are salted with traps that read as huge discounts; adding the model residual as a second signal moves ${d.median_only.precision_at_5.toFixed(2)} to ${d.two_signal.precision_at_5.toFixed(2)} — same listings, same labels, different ordering.`;
   }catch(e){ $('#evalCards').innerHTML=`<div class="loading">Could not reach /evals — ${esc(e.message)}</div>`; }
+}
+
+/* ── BY MEANING (semantic) ───────────────────────────────────────────── */
+async function loadSemantic(){
+  if(loaded.semantic) return; loaded.semantic=true;
+  $('#semResults').innerHTML='<div class="loading">Loading…</div>';
+  try{
+    const d=await (await fetch(`/semantic?q=${encodeURIComponent(state.q)}&k=8`)).json();
+    $('#semResults').innerHTML = d.results.map(semCard).join('') || '<div class="loading">No matches.</div>';
+  }catch(e){ $('#semResults').innerHTML=`<div class="loading">Could not reach /semantic — ${esc(e.message)}</div>`; loaded.semantic=false; }
+}
+function semCard(r){
+  const sim = r.similarity!=null ? Math.round(r.similarity*100)+'% match' : (r.verdict||'');
+  const thumb = r.image_url?`<img class="thumb" src="${esc(r.image_url)}" referrerpolicy="no-referrer" alt="">`:`<div class="thumb"></div>`;
+  return `<div class="card">${thumb}
+    <div class="card-body"><div class="card-head"><span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span></div>
+      <div class="title">${esc(r.title)}</div></div>
+    <div class="signal"><span class="sig-note accent">${esc(sim)}</span></div>
+    <div class="priceblock"><div class="price">${r.price!=null?money(r.price):''}</div>${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}</div>
+  </div>`;
+}
+
+/* ── ASK (RAG) ───────────────────────────────────────────────────────── */
+async function loadAsk(){
+  if(loaded.ask) return; loaded.ask=true;
+  $('#askBody').innerHTML='<div class="loading">Loading…</div>';
+  try{
+    const d=await (await fetch(`/ask?q=${encodeURIComponent(state.q)}`)).json();
+    const badge = d.grounded?'<span class="tag tag-deal">grounded ✓</span>':'<span class="tag tag-susp">ungrounded</span>';
+    $('#askBody').innerHTML = `
+      <div class="card" style="flex-direction:column;align-items:stretch;gap:var(--space-3);">
+        <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;">${badge}<span class="tag tag-fair">${d.used_llm?'LLM':'deterministic'}</span><span class="mono" style="font-size:11px;color:var(--color-neutral-600);margin-left:auto;">${d.sources.length} sources</span></div>
+        <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;">${esc(d.answer)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">${d.sources.map(s=>`<span class="mono" style="font-size:10px;color:var(--color-neutral-600);border:1px solid var(--color-neutral-800);border-radius:5px;padding:2px 7px;">${esc(s)}</span>`).join('')}</div>
+      </div>`;
+  }catch(e){ $('#askBody').innerHTML=`<div class="loading">Could not reach /ask — ${esc(e.message)}</div>`; loaded.ask=false; }
+}
+
+/* ── GENERIC INSPECTOR ───────────────────────────────────────────────── */
+async function loadGeneric(m){
+  const cfg=GENERIC[m]; if(!cfg) return;
+  $('#genKicker').textContent=cfg.kicker; $('#genTitle').textContent=cfg.title; $('#genSub').textContent=cfg.sub;
+  if(loaded[m]) return; loaded[m]=true;
+  $('#genBody').innerHTML='<div class="loading">Loading…</div>';
+  try{
+    const url = cfg.ep + (cfg.q?`?q=${encodeURIComponent(state.q)}`:'');
+    const r=await fetch(url); if(!r.ok) throw new Error('unavailable');
+    $('#genBody').innerHTML = renderInspector(await r.json());
+  }catch(e){ $('#genBody').innerHTML=mlHint(cfg.ep); loaded[m]=false; }
+}
+const isScalar = v => v===null || ['string','number','boolean'].includes(typeof v);
+const fmtV = v => v===null?'—':(typeof v==='boolean'?(v?'✓ true':'✗ false'):esc(String(v)));
+function kvRows(o){
+  return Object.entries(o).map(([k,v])=>{
+    let val;
+    if(isScalar(v)) val=fmtV(v);
+    else if(Array.isArray(v)) val=`<span class="muted">[${v.length}]</span>`+(v.length&&isScalar(v[0])?' '+v.slice(0,6).map(x=>`<span class="mono" style="font-size:10px;background:var(--color-neutral-900);border-radius:4px;padding:1px 6px;">${fmtV(x)}</span>`).join(' '):'');
+    else val=`<span class="muted">{${esc(Object.keys(v).join(', ').slice(0,60))}}</span>`;
+    return `<div style="display:flex;gap:var(--space-4);padding:var(--space-2) 0;font-size:13px;background:linear-gradient(to right,var(--color-divider),var(--color-divider)) no-repeat bottom/100% 1px;"><span class="muted" style="flex:0 0 42%;">${esc(k)}</span><span class="mono" style="flex:1;min-width:0;">${val}</span></div>`;
+  }).join('');
+}
+function renderInspector(d){
+  if(isScalar(d)) return `<div class="statcard"><div class="num" style="font-size:26px;">${fmtV(d)}</div></div>`;
+  const E=Object.entries(d);
+  const scalars=E.filter(([,v])=>isScalar(v)), objects=E.filter(([,v])=>v&&!Array.isArray(v)&&typeof v==='object'), arrays=E.filter(([,v])=>Array.isArray(v));
+  let h='';
+  if(scalars.length) h+=`<div class="gridcards" style="margin-bottom:var(--space-6);">`+scalars.map(([k,v])=>{
+    const long = typeof v==='string' && v.length>16;
+    return `<div class="statcard"><div class="k">${esc(k)}</div><div class="${long?'':'num'}" style="${long?'font-size:14px;line-height:1.45;':'font-size:24px;'}overflow-wrap:anywhere;">${fmtV(v)}</div></div>`;
+  }).join('')+`</div>`;
+  for(const [k,v] of objects) h+=`<div class="statcard" style="margin-bottom:var(--space-4);gap:0;"><div class="k" style="margin-bottom:var(--space-2);">${esc(k)}</div>${kvRows(v)}</div>`;
+  for(const [k,v] of arrays){
+    h+=`<div style="margin-bottom:var(--space-6);"><h5 style="margin:0 0 var(--space-3);">${esc(k)} <span class="muted mono" style="font-size:11px;">[${v.length}]</span></h5>`;
+    if(v.length && typeof v[0]==='object' && !Array.isArray(v[0])){
+      const cols=[...new Set(v.flatMap(o=>Object.keys(o)))].slice(0,6);
+      h+=`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><tr>${cols.map(c=>`<th style="text-align:left;padding:var(--space-2);color:var(--color-neutral-500);font-weight:500;border-bottom:1px solid var(--color-divider);">${esc(c)}</th>`).join('')}</tr>`+
+        v.slice(0,12).map(o=>`<tr>${cols.map(c=>`<td style="padding:var(--space-2);border-bottom:1px solid var(--color-neutral-900);" class="mono">${isScalar(o[c])?fmtV(o[c]):`<span class="muted">${o[c]==null?'—':(Array.isArray(o[c])?'['+o[c].length+']':'{…}')}</span>`}</td>`).join('')}</tr>`).join('')+`</table></div>`;
+    } else {
+      h+=`<div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">`+v.slice(0,20).map(x=>`<span class="mono" style="font-size:11px;background:var(--color-neutral-900);border-radius:5px;padding:2px 8px;">${isScalar(x)?fmtV(x):esc(JSON.stringify(x).slice(0,40))}</span>`).join('')+`</div>`;
+    }
+    h+=`</div>`;
+  }
+  return h || '<div class="loading">No data.</div>';
 }
 
 loadDeals();
