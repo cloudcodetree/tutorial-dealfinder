@@ -4,6 +4,15 @@
 #   docker compose --profile seed up seed # one-shot: populate pgvector from the snapshot
 #   docker compose down                   # stop; add -v to also wipe the pgvector volume
 #
+# LIGHT by default: the backend image omits the heavy ML extras so it stays small
+# and the Docker VM disk doesn't balloon. For the ML lessons (Parts 21/22 — the
+# /models, /tracking, and Prefect-backed /pipeline modes) opt into the full image:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up
+#
+# That override swaps the backend to Dockerfile.full (torch/mlflow/prefect). It
+# wants >=4 GB of Docker-VM memory (fitting the torch MLP OOMs a 2 GB VM).
+#
 # (On hosts without the `docker compose` plugin, the standalone `docker-compose`
 #  binary works identically.)
 #
@@ -42,6 +51,10 @@ services:
       # always talks to the `db` service (not the host).
       DATABASE_URL: postgresql://dealfinder:dealfinder@db:5432/dealfinder
       DEALFINDER_ENABLE_PAID_SOURCES: "0"   # free-tier default; flip in .env to enable
+      # Persist the fastembed model in a named volume (below), so the ~130MB
+      # download happens ONCE and survives rebuilds — instead of re-downloading
+      # and re-bloating the image cache every build. /context reads it from here too.
+      FASTEMBED_CACHE_PATH: /models-cache
     env_file:
       - path: .env          # your live-source / Supabase / Stripe keys (optional)
         required: false     # works without it: snapshot fallback + demo secrets
@@ -51,6 +64,7 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ./:/app             # live source; deps live in the image's site-packages
+      - model_cache:/models-cache   # persistent embed-model cache (survives rebuilds)
     command: uvicorn dealfinder.serve:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -87,3 +101,4 @@ services:
 
 volumes:
   pgdata:
+  model_cache:   # fastembed model weights — downloaded once, reused across rebuilds

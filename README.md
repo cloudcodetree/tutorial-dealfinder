@@ -63,16 +63,25 @@ docker compose down                     # stop  (add -v to also delete the pgvec
   `seed` profile once to populate it with real embeddings.
 - This supersedes running `uvicorn` / `vite` / a standalone pgvector container by hand.
 - No `docker compose` plugin? The standalone `docker-compose <same args>` binary works too.
-- **Memory & the ML endpoints:** most of the app (`/healthz`, search, the `/auth`
-  `/billing` `/compliance` `/ops` `/evals` `/suggestions` inspectors, the SPA, the
-  `seed` profile) runs fine on a small (~2 GB) Docker VM. Three endpoints do **not**
-  from the light dev image: `/models` (needs `torch`), `/tracking` (needs `mlflow`),
-  and `/pipeline`'s `has_prefect` (needs `prefect`) — `Dockerfile.dev` omits those
-  extras on purpose. Run those three in the venv
-  (`pip install -e ".[dev,torch,mlflow,prefect]"` then `uvicorn dealfinder.serve:app`),
-  or add the extras to `Dockerfile.dev` **and** raise the Docker VM to ≥ 4 GB
-  (`colima start --memory 4`) — fitting the torch MLP will OOM/hang a 2 GB VM.
-  *Live* semantic search also wants ≥ 4 GB (it loads the embedding model).
+- **Memory & the ML endpoints:** most of the app (`/healthz`, search, RAG,
+  `/context`, and the `/auth` `/billing` `/compliance` `/ops` `/evals`
+  `/suggestions` inspectors, the SPA, the `seed` profile) runs fine on a small
+  (~2 GB) Docker VM from the **light default image**. Three endpoints need the
+  heavy extras: `/models` (needs `torch`), `/tracking` (needs `mlflow`), and
+  `/pipeline`'s `has_prefect` (needs `prefect`) — `Dockerfile.dev` omits them on
+  purpose so the image and the Docker-VM disk stay small. For those, opt into the
+  **full-ML override**:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.full.yml up
+  ```
+
+  It swaps the backend to `Dockerfile.full` (the extras) and wants the Docker VM
+  at ≥ 4 GB (`colima start --memory 4`) — fitting the torch MLP OOMs a 2 GB VM.
+  (Or run those three in the host venv:
+  `pip install -e ".[dev,torch,mlflow,prefect]"` then `uvicorn dealfinder.serve:app`.)
+  The embed model is cached in the `model_cache` volume, so it downloads once and
+  survives rebuilds. *Live* semantic search also wants ≥ 4 GB (it loads that model).
 
 ## Steps (and what each adds)
 

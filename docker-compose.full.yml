@@ -1,0 +1,18 @@
+# Opt-in FULL-ML override — layer on top of docker-compose.yml for the ML lessons:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up
+#
+# It swaps the backend (and the seed one-shot) to Dockerfile.full, which adds
+# torch/mlflow/prefect so /models, /tracking, and the Prefect-backed /pipeline
+# work in-container. Everything else (ports, mounts, DB, model cache) is inherited
+# from the base compose file. Needs >=4 GB of Docker-VM memory.
+name: dealfinder
+
+services:
+  backend:
+    build:
+      dockerfile: Dockerfile.full
+
+  seed:
+    build:
+      dockerfile: Dockerfile.full

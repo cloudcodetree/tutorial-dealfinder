@@ -1,0 +1,21 @@
+# DealFinder FULL dev image — opt-in, for the ML lessons only.
+#
+# Same as Dockerfile.dev but WITH the heavy extras (torch/mlflow/prefect) so the
+# ML-heavy modes work in-container: /models (torch MLP), /tracking (mlflow
+# registry), and /pipeline on a real Prefect engine. Kept OUT of the default
+# image because torch alone is ~2 GB — baking it into the always-on stack bloats
+# the image and the Docker-VM disk. Use via the compose override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.full.yml up
+#
+# Needs >=4 GB of Docker-VM memory (fitting the torch MLP OOMs a 2 GB VM).
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY . .
+RUN pip install --no-cache-dir -e ".[dev,torch,mlflow,prefect]"
+
+EXPOSE 8000
+
+CMD ["uvicorn", "dealfinder.serve:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
