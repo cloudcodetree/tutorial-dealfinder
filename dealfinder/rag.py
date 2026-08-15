@@ -25,7 +25,6 @@ is injectable so tests exercise the LLM branch without a network call.
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 
@@ -112,17 +111,17 @@ def retrieve(
     """Retrieve the top-k real listings for ``query`` with their deal signal.
 
     Embeds the query (fastembed bge-small, via ``search_catalog``), ranks against
-    the cached title embeddings — or pgvector ``semantic_search`` when
-    ``DATABASE_URL`` is set — hybridizes with BM25, and value-reranks so honest
-    deals float above too-good-to-be-true traps. Each result carries its
+    the cached title embeddings, hybridizes with BM25, and **value-reranks** so
+    honest deals float above too-good-to-be-true traps. Each result carries its
     similarity, price, and the two-signal verdict, so an answer can ground on it.
 
-    Deterministic against the frozen snapshot: same corpus + same cached
-    embeddings ⇒ same top-k. ``use_db`` overrides where vectors come from: leave
-    it ``None`` to follow ``DATABASE_URL`` (the default), or pass ``False`` to force
-    the reproducible in-memory snapshot path regardless of env — used by the
-    context-engineering surface (Part 16) so its token math never depends on how
-    much has been seeded into pgvector.
+    Deterministic by default: it ranks over the committed cached embeddings, so the
+    same corpus ⇒ the same top-k regardless of environment — that's what makes the
+    RAG answers (and the tests) reproducible. The pgvector store (Part 13) holds the
+    same vectors and powers the raw-cosine ``/semantic`` browser; opt into it here
+    with ``use_db=True``, but note that path returns **raw semantic candidates
+    without the value rerank**, so it is not the value-reranked view below. Leave
+    ``use_db`` falsy (the default) for the reproducible reranked path.
     """
     if products is None:
         products, embeddings = load_catalog_embeddings()
@@ -132,8 +131,7 @@ def retrieve(
     medians = _load_medians()
     models = _category_models(products)
 
-    from_db = bool(os.getenv("DATABASE_URL")) if use_db is None else use_db
-    if from_db:
+    if use_db:  # explicit opt-in only — raw pgvector cosine, no value rerank
         ranked = _retrieve_pgvector(query, products, k)
     else:
         # Hybrid semantic+BM25 → RRF → value rerank over the cached embeddings.
