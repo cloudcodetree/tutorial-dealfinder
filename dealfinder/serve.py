@@ -95,51 +95,66 @@ def search(q: str):
 
 @app.get("/ranked")
 def ranked(q: str, k: int = 12):
-    """Value-ranked offers WITH the two-signal verdict on every item (Part 18).
+    """LIVE value-ranked deals for ANY query, with the two-signal verdict where a
+    trained category model applies.
 
-    The redesign's consumer view (`/redesign`) hangs off this. Unlike `/search`
-    (live offers, median signal only) it runs the deterministic offline retriever —
-    the same value rerank `/semantic` uses without a DB — so every card carries its
-    real `verdict` (DEAL/SUSPICIOUS/FAIR/OVERPRICED), the fair price, and the model
-    residual. Offline, deterministic, and never touches pgvector."""
-    from .dealscore import residual_fraction
-    from .rag import retrieve
+    The redesign's "Live deals" view hangs off this. It aggregates real offers
+    across the live sources (like `/search`), then scores each offer with the
+    two-signal deal verdict — but ONLY where a fair-price model exists for the
+    offer's category (the electronics corpus the models were trained on). Offers
+    in a category the model has never seen (e.g. a "guitar" search) get an honest
+    value-only signal (percent under the live median) and ``verdict=null`` rather
+    than a fabricated verdict. Ranked by value, with too-good-to-be-true
+    (suspicious) and overpriced offers demoted."""
+    from .dealscore import median_signal, render_badge, residual_fraction
+    from .extract import guess_category
+    from .features import featurize
+    from .schema import Product
 
-    items = retrieve(q, k=k)
-    results = []
-    prices = []
-    for it in items:
-        p = _catalog[_idx[it.id]] if it.id in _idx else None
-        fair = _fair.get(it.id)
-        rf = residual_fraction(it.price, fair) if fair else None
-        results.append({
-            "id": it.id,
-            "title": it.title,
-            "brand": getattr(p, "brand", None),
-            "price": it.price,
-            "source": it.source,
-            "verdict": it.verdict,
-            "pct_under_median": round(it.median_signal * 100, 1),
-            "fair": round(fair, 2) if fair else None,
+    result = aggregate(q)
+    median = result.get("median_price") or 0.0
+    scored = []
+    for r in result.get("results", []):
+        price = float(r["price"])
+        m = median_signal(price, median) if median else 0.0
+        cat = guess_category(r["title"])
+        model = _cat_models.get(cat) if cat else None
+        verdict = fair = rf = None
+        if model is not None:
+            p = Product(id=r["id"], title=r["title"], brand=r.get("brand"),
+                        category=cat, price=price, url=r.get("url") or "",
+                        source=r.get("source") or "live")
+            fair = float(fair_price(model, featurize(p)))
+            rf = residual_fraction(price, fair)
+            verdict = render_badge(m, rf).lower()   # deal / suspicious / fair / overpriced
+        scored.append({
+            "id": r["id"], "title": r["title"], "brand": r.get("brand"),
+            "price": round(price, 2), "source": r.get("source"),
+            "verdict": verdict,                       # None → no model covers this category
+            "pct_under_median": round(m * 100, 1),
+            "fair": round(fair, 2) if fair is not None else None,
             "residual_frac": round(rf, 3) if rf is not None else None,
-            "reason": it.reason,
-            "url": getattr(p, "url", None),
-            "image_url": getattr(p, "image_url", None),
+            "category": cat, "reason": None,
+            "url": r.get("url"), "image_url": r.get("image_url"),
         })
-        prices.append(it.price)
-    # The displayed median must be the SAME capture median the two-signal model
-    # scored against (so it agrees with each card's `pct_under_median` and reason),
-    # not statistics.median() of the retrieved sample. Back it out of the signal:
-    # median_signal = (median - price)/median  ⇒  median = price / (1 - signal).
-    median = 0.0
-    for it in items:
-        s = it.median_signal
-        if it.price and s not in (0.0, 1.0):
-            median = round(it.price / (1 - s), 2)
-            break
-    if not median and prices:
-        median = round(statistics.median(prices), 2)
-    return {"query": q, "count": len(results), "median_price": median, "results": results}
+
+    def _value(x):
+        s = (x["pct_under_median"] or 0) / 100.0
+        if x["verdict"] == "suspicious":
+            return s - 1.0        # too-good-to-be-true sinks below genuine deals
+        if x["verdict"] == "overpriced":
+            return s - 0.5
+        return s
+    scored.sort(key=_value, reverse=True)
+    scored = scored[:k]
+    return {
+        "query": q,
+        "count": len(scored),
+        "median_price": round(median, 2),
+        "sources_live": result.get("sources_live", []),
+        "modeled": sum(1 for x in scored if x["verdict"] is not None),
+        "results": scored,
+    }
 
 
 @app.get("/redesign", response_class=HTMLResponse)

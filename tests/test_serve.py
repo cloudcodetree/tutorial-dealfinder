@@ -50,28 +50,37 @@ def test_semantic_offline_fallback_returns_verdicts():
         assert bose["verdict"] == "suspicious"
 
 
-def test_ranked_endpoint_powers_the_redesign_with_real_verdicts():
-    # /ranked is the redesign's value-card source: the deterministic offline
-    # retriever (never pgvector) with the two-signal verdict, fair price, and
-    # residual on every item, and a displayed median that AGREES with each card.
-    r = client.get("/ranked", params={"q": "noise cancelling headphones", "k": 8})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["count"] > 0
-    assert {v["verdict"] for v in body["results"]} <= {"deal", "fair", "suspicious", "overpriced"}
+def test_ranked_is_live_and_scores_only_where_a_model_applies(monkeypatch):
+    # /ranked aggregates LIVE offers for ANY query, then attaches the two-signal
+    # verdict ONLY where a trained category model exists (the electronics corpus);
+    # out-of-domain offers (e.g. a guitar) are value-only (verdict=None) instead of
+    # a fabricated verdict. Mock aggregate() so this is hermetic and deterministic.
+    import dealfinder.serve as serve
 
-    anker = next(v for v in body["results"] if "Anker Soundcore Q20i" in v["title"])
-    assert anker["verdict"] == "deal" and anker["price"] == 44.99
-    assert anker["fair"] is not None and anker["residual_frac"] is not None
+    fake = {
+        "query": "x", "sources_live": ["eBay"], "throttled": [], "median_price": 100.0,
+        "count": 2,
+        "results": [
+            {"id": "a", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
+             "price": 50.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 50.0},
+            {"id": "g", "title": "41-Inch Dreadnought Acoustic Guitar Black with Gig Bag",
+             "brand": None, "price": 60.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 40.0},
+        ],
+    }
+    monkeypatch.setattr(serve, "aggregate", lambda q: fake)
+    body = client.get("/ranked", params={"q": "anything", "k": 8}).json()
 
-    # The $46 Bose QC45 is HELD BACK: the second signal (residual) trips the 0.70 gate.
-    bose = next(v for v in body["results"] if "QuietComfort 45" in v["title"])
-    assert bose["verdict"] == "suspicious" and bose["residual_frac"] > 0.70
+    # The headphone (audio category → a model exists) gets a real two-signal verdict.
+    hp = next(r for r in body["results"] if "Sony" in r["title"])
+    assert hp["verdict"] in {"deal", "fair", "suspicious", "overpriced"}
+    assert hp["fair"] is not None and hp["residual_frac"] is not None
 
-    # The displayed median is the capture median the signal scored against, not
-    # statistics.median() of the sample: it reconstructs each card's pct_under_median.
-    m = body["median_price"]
-    assert abs((m - anker["price"]) / m * 100 - anker["pct_under_median"]) < 0.5
+    # The guitar (no category model) is value-only — an honest signal, not a verdict.
+    guitar = next(r for r in body["results"] if "Guitar" in r["title"])
+    assert guitar["verdict"] is None
+    assert guitar["pct_under_median"] == 40.0 and guitar["fair"] is None
+
+    assert body["modeled"] == 1 and body["count"] == 2
 
 
 def test_redesign_route_serves_the_nocturne_page():

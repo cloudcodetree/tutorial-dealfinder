@@ -374,7 +374,8 @@ function tagFor(v){
   if(v==='deal') return '<span class="tag tag-deal">DEAL</span>';
   if(v==='suspicious') return '<span class="tag tag-susp">HELD BACK · SUSPICIOUS</span>';
   if(v==='overpriced') return '<span class="tag tag-over">OVERPRICED</span>';
-  return '<span class="tag tag-fair">FAIR</span>';
+  if(v==='fair') return '<span class="tag tag-fair">FAIR</span>';
+  return '<span class="tag tag-fair">VALUE</span>';   // no price model for this category
 }
 function cardHTML(r,i){
   const pct = r.pct_under_median;
@@ -414,13 +415,15 @@ function cardHTML(r,i){
     </div>`;
   }
   const isDeal = r.verdict==='deal';
-  const fairNote = r.fair!=null ? `fair price ${money(r.fair)}` : '';
-  return `<div class="card ${i===0?'top':''}">
+  const noModel = r.verdict==null;
+  const fairNote = r.fair!=null ? `fair price ${money(r.fair)}` : (noModel ? 'no price model' : '');
+  const reason = r.reason || (noModel ? 'Ranked by value only — the price model doesn’t cover this category.' : '');
+  return `<div class="card ${i===0&&isDeal?'top':''}">
     ${thumb}
     <div class="card-body">
       <div class="card-head">${tagFor(r.verdict)} ${src}</div>
       <div class="title">${esc(r.title)}</div>
-      <div class="reason">${esc(r.reason||'')}</div>
+      <div class="reason">${esc(reason)}</div>
     </div>
     <div class="signal">
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(0,Math.min(100,pct))}%"></div></div>
