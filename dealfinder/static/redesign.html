@@ -292,6 +292,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$" + Number(n).toFixed(2);
 let state = { mode:"deals", q:"noise cancelling headphones" };
+let rankedThr = 0.70;   // suspicious-residual threshold; the backend sends the real value
 const loaded = {};
 const BESPOKE = ['deals','pipeline','evals','models','tracking','semantic','ask'];
 const GENERIC = {
@@ -361,6 +362,7 @@ async function loadDeals(){
   $('#results').innerHTML='<div class="loading">Loading real offers…</div>';
   try{
     const d = await (await fetch(`/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
+    rankedThr = d.residual_threshold ?? rankedThr;
     $('#dealsCount').textContent = d.count;
     $('#meta').innerHTML = `<span class="mono">${d.count} offers · median ${money(d.median_price)} · two-signal ranked</span>`;
     const held = d.results.filter(r=>r.verdict==='suspicious').length;
@@ -382,20 +384,24 @@ function cardHTML(r,i){
   const under = pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
   const thumb = r.image_url ? `<img class="thumb" src="${esc(r.image_url)}" alt="" referrerpolicy="no-referrer">` : `<div class="thumb"></div>`;
   const src = `<span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span>`;
+  const est = r.basis==='peers';       // fair price estimated from peers, not a trained model
+  const noBasis = r.basis==null;       // too few offers to compare → value-only
+  const estChip = est ? '<span class="mono" style="font-size:9px;color:var(--color-neutral-600);">· est. from similar offers</span>' : '';
+  const sig2 = est ? 'Signal 2 · peer residual' : 'Signal 2 · model residual';
+  const thrPct = Math.round(rankedThr*100);
   if(r.verdict==='suspicious'){
     const residPct = Math.max(0,Math.min(100,Math.round((r.residual_frac||0)*100)));
     return `<div class="card held">
       <div class="cardline">
         ${thumb}
         <div class="card-body">
-          <div class="card-head">${tagFor(r.verdict)} ${src}</div>
+          <div class="card-head">${tagFor(r.verdict)} ${src}${estChip}</div>
           <div class="title dim">${esc(r.title)}</div>
-          <div class="reason">${esc(r.reason||'')}</div>
         </div>
         <div class="signal">
           <div class="bar-track" style="background:var(--color-neutral-900);"><div class="bar-fill hatch" style="width:${Math.min(100,Math.abs(pct))}%"></div></div>
           <span class="sig-note">${under} claimed</span>
-          <span class="sig-note accent">residual ${r.residual_frac} &gt; 0.70</span>
+          <span class="sig-note accent">residual ${r.residual_frac} &gt; ${rankedThr}</span>
         </div>
         <div class="priceblock">
           <div class="price dim">${money(r.price)}</div>
@@ -406,24 +412,22 @@ function cardHTML(r,i){
         <div class="col">
           <div><div class="lab"><span class="muted">Signal 1 · under median</span><span class="mono" style="color:var(--color-accent-400);">${(pct/100).toFixed(2)}</span></div>
             <div class="track6"><div class="bar-fill" style="width:${Math.min(100,Math.abs(pct))}%"></div></div></div>
-          <div><div class="lab"><span class="muted">Signal 2 · model residual</span><span class="mono">${r.residual_frac}</span></div>
-            <div class="track6"><div class="bar-fill hatch" style="width:${residPct}%"></div><div class="tick" style="left:70%"></div></div>
-            <div class="sig-note" style="margin-top:4px;">threshold 0.70 — tripped · fair price ${money(r.fair)}</div></div>
+          <div><div class="lab"><span class="muted">${sig2}</span><span class="mono">${r.residual_frac}</span></div>
+            <div class="track6"><div class="bar-fill hatch" style="width:${residPct}%"></div><div class="tick" style="left:${thrPct}%"></div></div>
+            <div class="sig-note" style="margin-top:4px;">threshold ${rankedThr} — tripped · ${est?'peers ≈':'fair'} ${money(r.fair)}</div></div>
         </div>
-        <p>Both signals large means the listing isn't cheap, it's wrong — usually an accessory or a mislisting. The model puts this near ${money(r.fair)}; the two-signal gate is what holds it back where a naive median-only ranker would rank it #1.</p>
+        <p>${esc(r.reason||'')}</p>
       </div>
     </div>`;
   }
   const isDeal = r.verdict==='deal';
-  const noModel = r.verdict==null;
-  const fairNote = r.fair!=null ? `fair price ${money(r.fair)}` : (noModel ? 'no price model' : '');
-  const reason = r.reason || (noModel ? 'Ranked by value only — the price model doesn’t cover this category.' : '');
+  const fairNote = r.fair!=null ? (est?`≈ ${money(r.fair)} (similar offers)`:`fair price ${money(r.fair)}`) : (noBasis?'value only':'');
   return `<div class="card ${i===0&&isDeal?'top':''}">
     ${thumb}
     <div class="card-body">
-      <div class="card-head">${tagFor(r.verdict)} ${src}</div>
+      <div class="card-head">${tagFor(r.verdict)} ${src}${estChip}</div>
       <div class="title">${esc(r.title)}</div>
-      <div class="reason">${esc(reason)}</div>
+      <div class="reason">${esc(r.reason||'')}</div>
     </div>
     <div class="signal">
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(0,Math.min(100,pct))}%"></div></div>

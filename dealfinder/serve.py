@@ -93,48 +93,111 @@ def search(q: str):
     return result
 
 
+def _peer_fair_prices(offers: list[dict]) -> dict[int, float]:
+    """Category-agnostic fallback fair price: each offer's fair price is the median
+    price of its k nearest SEMANTIC neighbors within this result set.
+
+    Embed every offer's title once, then for offer i take the median price of its
+    most-similar peers. This gives a second signal for ANY search (not just the
+    electronics the trained models cover): an item far cheaper than its close peers
+    is suspicious, while one cheap-but-consistent-with-its-peers is a genuine deal.
+    It's the graceful-degradation layer under the trained per-category model.
+    Returns {index: peer_fair}; offers with too few neighbors are omitted."""
+    if len(offers) < 3:
+        return {}
+    try:
+        import numpy as np
+
+        embs = np.asarray(_embed_texts([o["title"] for o in offers]), dtype=float)
+        embs /= np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9
+        sims = embs @ embs.T
+        prices = np.array([float(o["price"]) for o in offers])
+        out: dict[int, float] = {}
+        for i in range(len(offers)):
+            nbrs = [j for j in np.argsort(-sims[i]) if j != i][:5]
+            if len(nbrs) >= 2:
+                out[i] = float(np.median(prices[nbrs]))
+        return out
+    except Exception:
+        return {}
+
+
+def _deal_reason(verdict, m, rf, fair, basis) -> str:
+    """The human-readable 'why' for a verdict — domain copy lives here (backend),
+    not in the page, so the UI only displays it."""
+    if verdict is None:
+        return "Ranked by value only — too few similar offers to estimate a fair price."
+    pct = round(m * 100)
+    src = "the price model" if basis == "model" else "similar offers"
+    ref = f"~${fair:.0f}" if fair else "the estimate"
+    if verdict == "deal":
+        return f"{pct}% under the median and consistent with {src} ({ref}) — a genuine deal."
+    if verdict == "suspicious":
+        return (f"Looks {pct}% under the median, but far below {src} ({ref}) — "
+                "too good to be true (likely an accessory or a mislisting).")
+    if verdict == "overpriced":
+        return f"Above the market median and above {src} ({ref})."
+    return f"Near the market median and {src} ({ref})."
+
+
 @app.get("/ranked")
 def ranked(q: str, k: int = 12):
-    """LIVE value-ranked deals for ANY query, with the two-signal verdict where a
-    trained category model applies.
+    """LIVE value-ranked deals for ANY query, with the two-signal verdict via a
+    layered fair-price estimator (a graceful-degradation design — the point of a
+    robust deal finder, not a headphones-only demo).
 
-    The redesign's "Live deals" view hangs off this. It aggregates real offers
-    across the live sources (like `/search`), then scores each offer with the
-    two-signal deal verdict — but ONLY where a fair-price model exists for the
-    offer's category (the electronics corpus the models were trained on). Offers
-    in a category the model has never seen (e.g. a "guitar" search) get an honest
-    value-only signal (percent under the live median) and ``verdict=null`` rather
-    than a fabricated verdict. Ranked by value, with too-good-to-be-true
-    (suspicious) and overpriced offers demoted."""
-    from .dealscore import median_signal, render_badge, residual_fraction
+    Aggregates real offers across the live sources (like `/search`), then scores
+    each with the two-signal deal verdict. The second signal (model residual)
+    comes from the best available fair-price estimate:
+      1. the trained per-category model, where one exists (the electronics corpus);
+      2. otherwise a PEER estimate — the median price of the offer's nearest
+         semantic neighbors in this result set (`basis="peers"`), so any search
+         (guitars, cookware, …) still gets a real second signal;
+      3. value-only (`verdict=null`) only when there are too few offers to compare.
+    Ranked by value, with too-good-to-be-true (suspicious) and overpriced demoted."""
+    from .dealscore import (
+        SUSPICIOUS_RESIDUAL_FRAC,
+        median_signal,
+        render_badge,
+        residual_fraction,
+    )
     from .extract import guess_category
     from .features import featurize
     from .schema import Product
 
     result = aggregate(q)
+    offers = result.get("results", [])
     median = result.get("median_price") or 0.0
+    peer_fair = _peer_fair_prices(offers)
+
     scored = []
-    for r in result.get("results", []):
+    for i, r in enumerate(offers):
         price = float(r["price"])
         m = median_signal(price, median) if median else 0.0
         cat = guess_category(r["title"])
         model = _cat_models.get(cat) if cat else None
-        verdict = fair = rf = None
+        fair = basis = None
         if model is not None:
             p = Product(id=r["id"], title=r["title"], brand=r.get("brand"),
                         category=cat, price=price, url=r.get("url") or "",
                         source=r.get("source") or "live")
-            fair = float(fair_price(model, featurize(p)))
+            fair, basis = float(fair_price(model, featurize(p))), "model"
+        elif i in peer_fair and peer_fair[i] > 0:
+            fair, basis = peer_fair[i], "peers"
+        verdict = rf = None
+        if fair is not None:
             rf = residual_fraction(price, fair)
             verdict = render_badge(m, rf).lower()   # deal / suspicious / fair / overpriced
         scored.append({
             "id": r["id"], "title": r["title"], "brand": r.get("brand"),
             "price": round(price, 2), "source": r.get("source"),
-            "verdict": verdict,                       # None → no model covers this category
+            "verdict": verdict,
             "pct_under_median": round(m * 100, 1),
             "fair": round(fair, 2) if fair is not None else None,
             "residual_frac": round(rf, 3) if rf is not None else None,
-            "category": cat, "reason": None,
+            "basis": basis,               # "model" | "peers" | None (value-only)
+            "category": cat,
+            "reason": _deal_reason(verdict, m, rf, fair, basis),
             "url": r.get("url"), "image_url": r.get("image_url"),
         })
 
@@ -152,7 +215,9 @@ def ranked(q: str, k: int = 12):
         "count": len(scored),
         "median_price": round(median, 2),
         "sources_live": result.get("sources_live", []),
-        "modeled": sum(1 for x in scored if x["verdict"] is not None),
+        "residual_threshold": SUSPICIOUS_RESIDUAL_FRAC,   # domain constant, not hardcoded in the UI
+        "modeled": sum(1 for x in scored if x["basis"] == "model"),
+        "estimated": sum(1 for x in scored if x["basis"] == "peers"),
         "results": scored,
     }
 

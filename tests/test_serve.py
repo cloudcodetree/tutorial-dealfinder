@@ -50,37 +50,56 @@ def test_semantic_offline_fallback_returns_verdicts():
         assert bose["verdict"] == "suspicious"
 
 
-def test_ranked_is_live_and_scores_only_where_a_model_applies(monkeypatch):
-    # /ranked aggregates LIVE offers for ANY query, then attaches the two-signal
-    # verdict ONLY where a trained category model exists (the electronics corpus);
-    # out-of-domain offers (e.g. a guitar) are value-only (verdict=None) instead of
-    # a fabricated verdict. Mock aggregate() so this is hermetic and deterministic.
+def test_peer_fair_prices_flags_the_within_cluster_outlier(monkeypatch):
+    # The category-agnostic fallback: an offer's fair price is the median of its
+    # nearest semantic neighbors in the result set. With identical embeddings every
+    # offer's peers are the others, so the cheap outlier's fair price is the median
+    # of the rest — far above it. Mock embeddings → hermetic, no model needed.
+    import dealfinder.serve as serve
+
+    offers = [{"title": f"acoustic guitar {i}", "price": p}
+              for i, p in enumerate([60.0, 65.0, 70.0, 75.0, 80.0])]
+    offers.append({"title": "acoustic guitar cheap", "price": 8.0})
+    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
+    pf = serve._peer_fair_prices(offers)
+    assert pf[5] >= 60.0          # the $8 outlier's peer fair is the median of the rest
+
+
+def test_ranked_scores_any_search_via_the_layered_estimator(monkeypatch):
+    # /ranked works for ANY search: trained model where a category has one
+    # (electronics), a peer estimate otherwise (guitars) — so every offer still
+    # gets a real second signal. Mock aggregate() + embeddings for determinism.
     import dealfinder.serve as serve
 
     fake = {
-        "query": "x", "sources_live": ["eBay"], "throttled": [], "median_price": 100.0,
-        "count": 2,
+        "query": "x", "sources_live": ["eBay"], "throttled": [], "median_price": 60.0, "count": 5,
         "results": [
-            {"id": "a", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
-             "price": 50.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 50.0},
-            {"id": "g", "title": "41-Inch Dreadnought Acoustic Guitar Black with Gig Bag",
-             "brand": None, "price": 60.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 40.0},
+            {"id": "h", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
+             "price": 50.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 16.7},
+            {"id": "g1", "title": "41-Inch Acoustic Guitar", "brand": None, "price": 60.0,
+             "source": "eBay", "url": "", "image_url": None, "deal_pct": 0.0},
+            {"id": "g2", "title": "Full-Size Acoustic Guitar", "brand": None, "price": 70.0,
+             "source": "eBay", "url": "", "image_url": None, "deal_pct": -16.7},
+            {"id": "g3", "title": "Dreadnought Acoustic Guitar", "brand": None, "price": 65.0,
+             "source": "eBay", "url": "", "image_url": None, "deal_pct": 8.3},
+            {"id": "g4", "title": "Acoustic Guitar Bundle", "brand": None, "price": 8.0,
+             "source": "eBay", "url": "", "image_url": None, "deal_pct": 86.7},
         ],
     }
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
+    monkeypatch.setattr(serve, "_embed_texts",
+                        lambda titles: [[0.0, 1.0] if "Headphones" in t else [1.0, 0.0] for t in titles])
     body = client.get("/ranked", params={"q": "anything", "k": 8}).json()
 
-    # The headphone (audio category → a model exists) gets a real two-signal verdict.
+    # Electronics → trained model; guitars → peer estimate. Every offer gets a verdict.
     hp = next(r for r in body["results"] if "Sony" in r["title"])
-    assert hp["verdict"] in {"deal", "fair", "suspicious", "overpriced"}
-    assert hp["fair"] is not None and hp["residual_frac"] is not None
-
-    # The guitar (no category model) is value-only — an honest signal, not a verdict.
-    guitar = next(r for r in body["results"] if "Guitar" in r["title"])
-    assert guitar["verdict"] is None
-    assert guitar["pct_under_median"] == 40.0 and guitar["fair"] is None
-
-    assert body["modeled"] == 1 and body["count"] == 2
+    assert hp["basis"] == "model" and hp["verdict"] in {"deal", "fair", "suspicious", "overpriced"}
+    guitars = [r for r in body["results"] if "Guitar" in r["title"]]
+    assert all(g["basis"] == "peers" and g["verdict"] is not None for g in guitars)
+    # The $8 guitar is far below its peer cluster → held back as too-good-to-be-true.
+    cheap = next(r for r in body["results"] if r["price"] == 8.0)
+    assert cheap["verdict"] == "suspicious"
+    assert body["modeled"] == 1 and body["estimated"] == 4
 
 
 def test_redesign_route_serves_the_nocturne_page():
