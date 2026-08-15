@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealFinder — Nocturne</title>
+<style>
+/* ── Nocturne tokens (ported from the design system) ───────────────────── */
+:root{
+  --color-bg:#161826; --color-surface:#232532; --color-text:#e9e9ed;
+  --color-accent:#9184d9; --color-divider:color-mix(in srgb,#e9e9ed 16%,transparent);
+  --color-neutral-400:#b2b6ca; --color-neutral-500:#9397ab; --color-neutral-600:#75798c;
+  --color-neutral-800:#3f424d; --color-neutral-900:#292b31;
+  --color-accent-100:#f5f4ff; --color-accent-300:#d2cefd; --color-accent-400:#b5abfc;
+  --color-accent-600:#796cbf; --color-accent-800:#423a6a; --color-accent-900:#2b2741;
+  --font-heading:"Inter",system-ui,sans-serif; --font-body:"Inter",system-ui,sans-serif;
+  --space-1:2.8px; --space-2:5.6px; --space-3:8.4px; --space-4:11.2px; --space-6:16.8px; --space-8:22.4px;
+  --radius-sm:4px; --radius-md:8px; --radius-lg:14px;
+  --shadow-sm:0 0 0 1px #3f424d; --shadow-md:0 0 0 1px #595d6c,0 6px 18px rgba(0,0,0,.55);
+  --shadow-lg:0 0 0 1px #9397ab,0 16px 40px rgba(0,0,0,.65);
+  --ok:#7fd6a3; --warn:#e6b566;
+}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);font-size:15px;line-height:1.55;}
+h1,h2,h3,h4,h5,h6{font-family:var(--font-heading);font-weight:500;line-height:1.12;letter-spacing:-.015em;margin:0;}
+h6{font-size:13px;letter-spacing:.08em;text-transform:uppercase;}
+a{color:var(--color-accent);text-decoration:none;} a:hover{color:var(--color-accent-400);}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+.muted{color:var(--color-neutral-500);}
+button{font:inherit;cursor:pointer;}
+
+/* ── shell ─────────────────────────────────────────────────────────────── */
+.topbar{position:sticky;top:0;z-index:30;background:var(--color-bg);
+  background-image:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent);
+  background-repeat:no-repeat;background-position:bottom;background-size:100% 1px;}
+.topbar-inner{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-8);}
+.brand{font-family:var(--font-heading);font-weight:500;font-size:18px;letter-spacing:-.015em;margin-right:auto;}
+.brand span{color:var(--color-accent);}
+.pill{font-size:11px;padding:3px 10px;border-radius:6px;background:var(--color-neutral-800);color:var(--color-neutral-400);}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-heading);font-weight:500;
+  font-size:14px;color:var(--color-text);background:transparent;border:1px solid transparent;padding:var(--space-2) 13px;border-radius:var(--radius-md);}
+.btn-primary{color:var(--color-accent);border-color:var(--color-accent);}
+.btn-primary:hover{background:color-mix(in srgb,var(--color-accent) 12%,transparent);}
+.btn-secondary{border-color:var(--color-divider);}
+.btn-secondary:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent);}
+.btn-block{width:100%;}
+
+.layout{display:flex;align-items:flex-start;}
+.rail{width:236px;flex:0 0 auto;background:color-mix(in srgb,var(--color-bg) 88%,#000);padding:var(--space-6);
+  display:flex;flex-direction:column;gap:var(--space-6);align-self:stretch;min-height:calc(100vh - 52px);}
+.rail-group{display:flex;flex-direction:column;gap:var(--space-1);}
+.rail-group h6{margin:0 0 var(--space-1);color:var(--color-neutral-600);}
+.rail-item{display:flex;align-items:center;gap:var(--space-3);width:100%;min-height:40px;
+  padding:var(--space-2) var(--space-3) var(--space-2) 19.4px;border:0;border-radius:var(--radius-md);background:none;
+  color:var(--color-neutral-400);font-size:14px;text-align:left;}
+.rail-item:hover{background:color-mix(in srgb,var(--color-surface) 55%,var(--color-bg));color:var(--color-text);}
+.rail-item .count{margin-left:auto;font-size:10px;color:var(--color-accent-600);}
+.rail-item.active{padding-left:var(--space-3);background:var(--color-accent-900);
+  box-shadow:inset 0 0 0 1px var(--color-accent);color:var(--color-accent-300);}
+.rail-item.active .bar{width:3px;height:14px;background:var(--color-accent);border-radius:2px;flex:0 0 auto;}
+.rail-item .bar{display:none;}
+.rail-item.soon{opacity:.62;}
+.rail-item.soon::after{content:"soon";margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--color-neutral-600);
+  border:1px solid var(--color-neutral-800);border-radius:4px;padding:1px 5px;text-transform:uppercase;}
+
+.main{flex:1;min-width:0;padding:var(--space-6) calc(var(--space-8)*1.5) calc(var(--space-8)*2.5);
+  display:flex;flex-direction:column;gap:var(--space-6);}
+
+/* ── search row ────────────────────────────────────────────────────────── */
+.searchrow{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;}
+.input{flex:1 1 220px;min-width:0;min-height:48px;padding:6px 14px;font:inherit;font-size:16px;color:var(--color-text);
+  caret-color:var(--color-accent);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-md);}
+.input:focus{outline:none;border-color:var(--color-accent);}
+.metaline{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;font-size:11px;color:var(--color-neutral-600);}
+
+/* ── deal cards (1b) ───────────────────────────────────────────────────── */
+.results{display:flex;flex-direction:column;gap:var(--space-3);}
+.card{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);
+  padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);background:var(--color-surface);box-shadow:var(--shadow-sm);}
+.card.top{box-shadow:0 0 0 1px var(--color-accent-800);}
+.card.held{background:color-mix(in srgb,var(--color-surface) 55%,var(--color-bg));border-left:3px solid var(--color-accent);
+  flex-direction:column;align-items:stretch;overflow:hidden;padding:0;}
+.card.held .cardline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);padding:var(--space-4) var(--space-6);}
+.thumb{width:64px;height:64px;border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-surface) 30%,var(--color-bg));
+  flex:0 0 auto;object-fit:cover;}
+.card-body{flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);}
+.card-head{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;}
+.title{font-family:var(--font-heading);font-weight:500;font-size:16px;}
+.title.dim{color:var(--color-neutral-400);}
+.reason{font-size:12px;color:var(--color-neutral-500);}
+.signal{flex:0 1 140px;min-width:120px;display:flex;flex-direction:column;gap:var(--space-1);}
+.bar-track{height:4px;border-radius:2px;background:var(--color-accent-900);overflow:hidden;}
+.bar-fill{height:100%;background:var(--color-accent);}
+.bar-fill.hatch{background:repeating-linear-gradient(135deg,var(--color-accent-600) 0 4px,var(--color-accent-900) 4px 8px);}
+.sig-note{font-size:10px;color:var(--color-neutral-600);}
+.sig-note.accent{color:var(--color-accent-400);}
+.priceblock{flex:0 0 auto;margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;}
+.price{font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:600;letter-spacing:-.02em;}
+.price.dim{color:var(--color-neutral-400);}
+.link-sm{font-size:11px;}
+.linkbtn{border:0;background:none;padding:0;color:var(--color-accent);font-size:11px;}
+
+.tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.06em;font-weight:600;padding:3px 10px;border-radius:6px;}
+.tag-deal{background:var(--color-accent-800);color:var(--color-accent-100);}
+.tag-fair{background:var(--color-neutral-800);color:var(--color-neutral-400);}
+.tag-over{background:var(--color-neutral-900);color:var(--color-neutral-500);}
+.tag-susp{border:1px solid var(--color-accent);color:var(--color-accent);}
+
+.why{padding:var(--space-6);background:color-mix(in srgb,var(--color-surface) 22%,var(--color-bg));
+  background-image:linear-gradient(to right,var(--color-divider),var(--color-divider));background-repeat:no-repeat;
+  background-position:top;background-size:100% 1px;display:flex;flex-wrap:wrap;gap:var(--space-6);}
+.why .col{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:var(--space-3);}
+.why .lab{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+.why .track6{height:6px;border-radius:3px;background:var(--color-neutral-900);overflow:hidden;position:relative;}
+.why .tick{position:absolute;top:-3px;width:1px;height:12px;background:var(--color-text);}
+.why p{flex:1 1 240px;margin:0;font-size:13px;color:var(--color-neutral-500);}
+
+/* ── pipeline (1c) ─────────────────────────────────────────────────────── */
+.stages{display:flex;gap:var(--space-3);align-items:stretch;overflow-x:auto;padding-bottom:var(--space-2);}
+.stage{flex:1 1 0;min-width:150px;padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);
+  background:var(--color-surface);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-1);}
+.stage .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);}
+.stage .big{font-family:ui-monospace,Menlo,monospace;font-size:26px;font-weight:600;letter-spacing:-.02em;}
+.stage .d{font-size:11px;color:var(--color-neutral-500);}
+.stage .arrow{align-self:center;color:var(--color-neutral-700);}
+.gridcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-4);}
+.statcard{padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);background:var(--color-surface);
+  box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-2);}
+.statcard .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent);}
+.statcard .num{font-family:ui-monospace,Menlo,monospace;font-size:34px;font-weight:600;letter-spacing:-.03em;}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--space-8);}
+.toprow{display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) 0;
+  background:linear-gradient(to right,var(--color-divider),var(--color-divider)) no-repeat top/100% 1px;}
+.toprow:first-child{background:none;}
+.toprow .rk{width:16px;flex:0 0 auto;font-size:11px;color:var(--color-neutral-600);}
+.toprow .nm{flex:1;min-width:0;font-size:14px;}
+.dist{display:flex;height:14px;border-radius:7px;overflow:hidden;box-shadow:var(--shadow-sm);}
+.dist span{display:block;}
+.legend{display:flex;gap:var(--space-6);flex-wrap:wrap;font-size:12px;color:var(--color-neutral-500);}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+.section-head{display:flex;flex-direction:column;gap:var(--space-2);max-width:70ch;}
+.loading{color:var(--color-neutral-600);font-size:13px;padding:var(--space-8) 0;}
+.hidden{display:none !important;}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">DealFinder<span>.</span></div>
+      <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">nocturne redesign · wired to live endpoints</span>
+      <span class="pill">free tier</span>
+      <button class="btn btn-secondary">Account</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="rail" id="rail">
+      <div class="rail-group">
+        <h6>Find</h6>
+        <button class="rail-item active" data-mode="deals"><span class="bar"></span>Live deals<span class="count" id="dealsCount"></span></button>
+        <button class="rail-item soon">By meaning</button>
+        <button class="rail-item soon">Ask the agent</button>
+        <button class="rail-item soon">Context window</button>
+        <button class="rail-item soon">Writer / reviewer</button>
+      </div>
+      <div class="rail-group">
+        <h6>Model</h6>
+        <button class="rail-item soon">Dataset</button>
+        <button class="rail-item" data-mode="pipeline"><span class="bar"></span>Pipeline</button>
+        <button class="rail-item soon">Models</button>
+        <button class="rail-item soon">Tracking</button>
+        <button class="rail-item" data-mode="evals"><span class="bar"></span>Evals</button>
+        <button class="rail-item soon">MLOps loop</button>
+      </div>
+      <div class="rail-group">
+        <h6>Guard</h6>
+        <button class="rail-item soon">Safety</button>
+        <button class="rail-item soon">Compliance</button>
+      </div>
+      <div class="rail-group">
+        <h6>Serve</h6>
+        <button class="rail-item soon">Inference</button>
+        <button class="rail-item soon">Cost &amp; drift</button>
+      </div>
+      <div class="rail-group">
+        <h6>Ship</h6>
+        <button class="rail-item soon">Auth</button>
+        <button class="rail-item soon">Billing</button>
+        <button class="rail-item soon">Saved searches</button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="searchrow">
+        <input class="input" id="q" value="noise cancelling headphones" placeholder="Search an item…">
+        <button class="btn btn-primary" id="go" style="min-height:48px;padding-inline:20px;">Search</button>
+      </div>
+      <div class="metaline" id="meta"></div>
+
+      <!-- DEALS (1b) -->
+      <section id="view-deals">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Ranked by value</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">two-signal score · median + model residual</span>
+        </div>
+        <div class="results" id="results"><div class="loading">Loading real offers…</div></div>
+      </section>
+
+      <!-- PIPELINE (1c) -->
+      <section id="view-pipeline" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 20 · pipelines &amp; orchestration</h6>
+          <h3>A query runs through the system, left to right</h3>
+          <p class="muted">The real five-stage data pipeline, its data-contract gate, and the label distribution it produces — live from <span class="mono">/pipeline</span>.</p>
+        </div>
+        <div class="stages" id="stages"><div class="loading">Loading pipeline…</div></div>
+        <div style="margin-top:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);">
+          <h5>Label distribution <span class="mono muted" style="font-size:11px;">· 270 rows, two-signal verdict</span></h5>
+          <div class="dist" id="dist"></div>
+          <div class="legend" id="distLegend"></div>
+        </div>
+      </section>
+
+      <!-- EVALS (1c inspector) -->
+      <section id="view-evals" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 23 · evaluation harness</h6>
+          <h3>The gate that stops a regression merging</h3>
+          <p class="muted">Precision@5 on the hand-labelled golden set, both rankers — live from <span class="mono">/evals</span>.</p>
+        </div>
+        <div class="gridcards" id="evalCards"><div class="loading">Loading evals…</div></div>
+        <div class="two" id="evalTop" style="margin-top:var(--space-8);"></div>
+        <p class="muted" id="evalNote" style="max-width:78ch;margin-top:var(--space-6);font-size:14px;"></p>
+      </section>
+    </main>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money = n => "$" + Number(n).toFixed(2);
+let state = { mode:"deals", q:"noise cancelling headphones" };
+const loaded = { deals:false, pipeline:false, evals:false };
+
+/* ── mode switching ──────────────────────────────────────────────────── */
+document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{
+  b.addEventListener('click',()=>setMode(b.dataset.mode));
+});
+function setMode(m){
+  state.mode = m;
+  document.querySelectorAll('.rail-item[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  ['deals','pipeline','evals'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==m));
+  if(m==='deals') loadDeals();
+  if(m==='pipeline') loadPipeline();
+  if(m==='evals') loadEvals();
+}
+
+/* ── DEALS (1b) ──────────────────────────────────────────────────────── */
+$('#go').addEventListener('click',()=>{ state.q=$('#q').value.trim()||state.q; loaded.deals=false; loadDeals(); });
+$('#q').addEventListener('keydown',e=>{ if(e.key==='Enter'){$('#go').click();} });
+
+async function loadDeals(){
+  if(loaded.deals) return; loaded.deals=true;
+  $('#results').innerHTML='<div class="loading">Loading real offers…</div>';
+  try{
+    const d = await (await fetch(`/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
+    $('#dealsCount').textContent = d.count;
+    $('#meta').innerHTML = `<span class="mono">${d.count} offers · median ${money(d.median_price)} · two-signal ranked</span>`;
+    const held = d.results.filter(r=>r.verdict==='suspicious').length;
+    $('#results').innerHTML = d.results.map(cardHTML).join('') +
+      `<button class="btn btn-secondary btn-block" style="min-height:44px;">Ranked by value · ${held} held back as too-good-to-be-true</button>`;
+    wireWhy();
+  }catch(e){ $('#results').innerHTML=`<div class="loading">Could not reach /ranked — ${esc(e.message)}</div>`; }
+}
+
+function tagFor(v){
+  if(v==='deal') return '<span class="tag tag-deal">DEAL</span>';
+  if(v==='suspicious') return '<span class="tag tag-susp">HELD BACK · SUSPICIOUS</span>';
+  if(v==='overpriced') return '<span class="tag tag-over">OVERPRICED</span>';
+  return '<span class="tag tag-fair">FAIR</span>';
+}
+function cardHTML(r,i){
+  const pct = r.pct_under_median;
+  const under = pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
+  const thumb = r.image_url ? `<img class="thumb" src="${esc(r.image_url)}" alt="" referrerpolicy="no-referrer">` : `<div class="thumb"></div>`;
+  const src = `<span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span>`;
+  if(r.verdict==='suspicious'){
+    const residPct = Math.max(0,Math.min(100,Math.round((r.residual_frac||0)*100)));
+    return `<div class="card held">
+      <div class="cardline">
+        ${thumb}
+        <div class="card-body">
+          <div class="card-head">${tagFor(r.verdict)} ${src}</div>
+          <div class="title dim">${esc(r.title)}</div>
+          <div class="reason">${esc(r.reason||'')}</div>
+        </div>
+        <div class="signal">
+          <div class="bar-track" style="background:var(--color-neutral-900);"><div class="bar-fill hatch" style="width:${Math.min(100,Math.abs(pct))}%"></div></div>
+          <span class="sig-note">${under} claimed</span>
+          <span class="sig-note accent">residual ${r.residual_frac} &gt; 0.70</span>
+        </div>
+        <div class="priceblock">
+          <div class="price dim">${money(r.price)}</div>
+          <button class="linkbtn why-toggle" data-i="${i}">why held? →</button>
+        </div>
+      </div>
+      <div class="why hidden" id="why-${i}">
+        <div class="col">
+          <div><div class="lab"><span class="muted">Signal 1 · under median</span><span class="mono" style="color:var(--color-accent-400);">${(pct/100).toFixed(2)}</span></div>
+            <div class="track6"><div class="bar-fill" style="width:${Math.min(100,Math.abs(pct))}%"></div></div></div>
+          <div><div class="lab"><span class="muted">Signal 2 · model residual</span><span class="mono">${r.residual_frac}</span></div>
+            <div class="track6"><div class="bar-fill hatch" style="width:${residPct}%"></div><div class="tick" style="left:70%"></div></div>
+            <div class="sig-note" style="margin-top:4px;">threshold 0.70 — tripped · fair price ${money(r.fair)}</div></div>
+        </div>
+        <p>Both signals large means the listing isn't cheap, it's wrong — usually an accessory or a mislisting. The model puts this near ${money(r.fair)}; the two-signal gate is what holds it back where a naive median-only ranker would rank it #1.</p>
+      </div>
+    </div>`;
+  }
+  const isDeal = r.verdict==='deal';
+  const fairNote = r.fair!=null ? `fair price ${money(r.fair)}` : '';
+  return `<div class="card ${i===0?'top':''}">
+    ${thumb}
+    <div class="card-body">
+      <div class="card-head">${tagFor(r.verdict)} ${src}</div>
+      <div class="title">${esc(r.title)}</div>
+      <div class="reason">${esc(r.reason||'')}</div>
+    </div>
+    <div class="signal">
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(0,Math.min(100,pct))}%"></div></div>
+      <span class="sig-note ${isDeal?'accent':''}">${under}</span>
+      <span class="sig-note">${fairNote}</span>
+    </div>
+    <div class="priceblock">
+      <div class="price">${money(r.price)}</div>
+      ${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
+    </div>
+  </div>`;
+}
+function wireWhy(){
+  document.querySelectorAll('.why-toggle').forEach(b=>b.addEventListener('click',()=>{
+    const el=$('#why-'+b.dataset.i); const open=!el.classList.contains('hidden');
+    el.classList.toggle('hidden'); b.textContent = open?'why held? →':'hide ↑';
+  }));
+}
+
+/* ── PIPELINE (1c) ───────────────────────────────────────────────────── */
+async function loadPipeline(){
+  if(loaded.pipeline) return; loaded.pipeline=true;
+  try{
+    const d = await (await fetch('/pipeline?q='+encodeURIComponent(state.q))).json();
+    const nums = { ingest:d.contract.total, normalize:d.contract.total, 'quality-gate':`${d.contract.valid}/${d.contract.total}`,
+                   label:d.contract.total, 'good_deals model':d.good_deals };
+    $('#stages').innerHTML = d.stages.map((s,i)=>`
+      ${i>0?'<div class="arrow">→</div>':''}
+      <div class="stage">
+        <div class="k">${esc(s.name)}</div>
+        <div class="big">${esc(String(nums[s.name]??''))}</div>
+        <div class="d">${esc(s.detail)}</div>
+      </div>`).join('');
+    const dist=d.label_distribution, tot=Object.values(dist).reduce((a,b)=>a+b,0);
+    const colors={deal:'var(--color-accent)',fair:'var(--color-neutral-600)',suspicious:'var(--color-accent-600)',overpriced:'var(--color-neutral-800)'};
+    const order=['deal','fair','suspicious','overpriced'];
+    $('#dist').innerHTML = order.map(k=>`<span style="width:${(dist[k]/tot*100).toFixed(1)}%;background:${colors[k]};" title="${k}: ${dist[k]}"></span>`).join('');
+    $('#distLegend').innerHTML = order.map(k=>`<span><i style="background:${colors[k]}"></i>${k} · ${dist[k]}</span>`).join('');
+  }catch(e){ $('#stages').innerHTML=`<div class="loading">Could not reach /pipeline — ${esc(e.message)}</div>`; }
+}
+
+/* ── EVALS (1c inspector) ────────────────────────────────────────────── */
+async function loadEvals(){
+  if(loaded.evals) return; loaded.evals=true;
+  try{
+    const d = await (await fetch('/evals')).json();
+    $('#evalCards').innerHTML = `
+      <div class="statcard"><div class="k">two_signal</div>
+        <div style="display:flex;align-items:baseline;gap:var(--space-3);"><span class="num" style="color:var(--color-accent-400);">${d.two_signal.precision_at_5.toFixed(2)}</span><span class="tag tag-deal">gate pass</span></div>
+        <div class="muted" style="font-size:11px;">precision@5 · gate ≥ ${d.gate.toFixed(2)}</div></div>
+      <div class="statcard"><div class="k" style="color:var(--color-neutral-500);">median_only</div>
+        <div style="display:flex;align-items:baseline;gap:var(--space-3);"><span class="num" style="color:var(--color-neutral-500);">${d.median_only.precision_at_5.toFixed(2)}</span><span class="tag tag-susp">gate fail</span></div>
+        <div class="muted" style="font-size:11px;">precision@5 · gate ≥ ${d.gate.toFixed(2)}</div></div>
+      <div class="statcard"><div class="k">A/B delta</div>
+        <div class="num">+${d.ab.delta.toFixed(2)}</div>
+        <div class="muted" style="font-size:11px;">winner: ${esc(d.ab.winner)} · the number you paste into the PR</div></div>`;
+    const col = (title,rows,dim)=>`<div><h5 style="margin:0 0 var(--space-3);${dim?'color:var(--color-neutral-500);':''}">${title}</h5>
+      ${rows.map((r,i)=>`<div class="toprow"><span class="rk">${i+1}</span><span class="nm ${dim&&r.label!=='deal'?'muted':''}">${esc(r.title)}</span>${r.label==='deal'?'<span class="tag tag-deal">deal</span>':'<span class="tag tag-susp">'+esc(r.label)+'</span>'}</div>`).join('')}</div>`;
+    $('#evalTop').innerHTML = col('two_signal · top 5', d.two_signal.top5, false) + col('median_only · top 5', d.median_only.top5, true);
+    $('#evalNote').textContent = `The naive ranker's top-5 are salted with traps that read as huge discounts; adding the model residual as a second signal moves ${d.median_only.precision_at_5.toFixed(2)} to ${d.two_signal.precision_at_5.toFixed(2)} — same listings, same labels, different ordering.`;
+  }catch(e){ $('#evalCards').innerHTML=`<div class="loading">Could not reach /evals — ${esc(e.message)}</div>`; }
+}
+
+loadDeals();
+</script>
+</body>
+</html>

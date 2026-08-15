@@ -50,6 +50,36 @@ def test_semantic_offline_fallback_returns_verdicts():
         assert bose["verdict"] == "suspicious"
 
 
+def test_ranked_endpoint_powers_the_redesign_with_real_verdicts():
+    # /ranked is the redesign's value-card source: the deterministic offline
+    # retriever (never pgvector) with the two-signal verdict, fair price, and
+    # residual on every item, and a displayed median that AGREES with each card.
+    r = client.get("/ranked", params={"q": "noise cancelling headphones", "k": 8})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] > 0
+    assert {v["verdict"] for v in body["results"]} <= {"deal", "fair", "suspicious", "overpriced"}
+
+    anker = next(v for v in body["results"] if "Anker Soundcore Q20i" in v["title"])
+    assert anker["verdict"] == "deal" and anker["price"] == 44.99
+    assert anker["fair"] is not None and anker["residual_frac"] is not None
+
+    # The $46 Bose QC45 is HELD BACK: the second signal (residual) trips the 0.70 gate.
+    bose = next(v for v in body["results"] if "QuietComfort 45" in v["title"])
+    assert bose["verdict"] == "suspicious" and bose["residual_frac"] > 0.70
+
+    # The displayed median is the capture median the signal scored against, not
+    # statistics.median() of the sample: it reconstructs each card's pct_under_median.
+    m = body["median_price"]
+    assert abs((m - anker["price"]) / m * 100 - anker["pct_under_median"]) < 0.5
+
+
+def test_redesign_route_serves_the_nocturne_page():
+    r = client.get("/redesign")
+    assert r.status_code == 200
+    assert "DealFinder" in r.text and "/ranked" in r.text
+
+
 def test_context_window_packs_orders_and_evicts():
     # Part 16 surface: retrieve wide, pack to a budget, evict the tail, and place
     # the survivors at the edges. Real bge token math, fully offline.

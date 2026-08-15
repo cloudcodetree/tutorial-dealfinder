@@ -76,6 +76,64 @@ def search(q: str):
     return result
 
 
+@app.get("/ranked")
+def ranked(q: str, k: int = 12):
+    """Value-ranked offers WITH the two-signal verdict on every item (Part 18).
+
+    The redesign's consumer view (`/redesign`) hangs off this. Unlike `/search`
+    (live offers, median signal only) it runs the deterministic offline retriever —
+    the same value rerank `/semantic` uses without a DB — so every card carries its
+    real `verdict` (DEAL/SUSPICIOUS/FAIR/OVERPRICED), the fair price, and the model
+    residual. Offline, deterministic, and never touches pgvector."""
+    from .dealscore import residual_fraction
+    from .rag import retrieve
+
+    items = retrieve(q, k=k)
+    results = []
+    prices = []
+    for it in items:
+        p = _catalog[_idx[it.id]] if it.id in _idx else None
+        fair = _fair.get(it.id)
+        rf = residual_fraction(it.price, fair) if fair else None
+        results.append({
+            "id": it.id,
+            "title": it.title,
+            "brand": getattr(p, "brand", None),
+            "price": it.price,
+            "source": it.source,
+            "verdict": it.verdict,
+            "pct_under_median": round(it.median_signal * 100, 1),
+            "fair": round(fair, 2) if fair else None,
+            "residual_frac": round(rf, 3) if rf is not None else None,
+            "reason": it.reason,
+            "url": getattr(p, "url", None),
+            "image_url": getattr(p, "image_url", None),
+        })
+        prices.append(it.price)
+    # The displayed median must be the SAME capture median the two-signal model
+    # scored against (so it agrees with each card's `pct_under_median` and reason),
+    # not statistics.median() of the retrieved sample. Back it out of the signal:
+    # median_signal = (median - price)/median  ⇒  median = price / (1 - signal).
+    median = 0.0
+    for it in items:
+        s = it.median_signal
+        if it.price and s not in (0.0, 1.0):
+            median = round(it.price / (1 - s), 2)
+            break
+    if not median and prices:
+        median = round(statistics.median(prices), 2)
+    return {"query": q, "count": len(results), "median_price": median, "results": results}
+
+
+@app.get("/redesign", response_class=HTMLResponse)
+def redesign():
+    """The Nocturne redesign surface (parallel to `/`): grouped-rail mode selector,
+    the 1b value-card deals view, and the 1c pipeline explainer — all wired to the
+    real endpoints (`/ranked`, `/pipeline`, `/evals`). Kept separate from the
+    course's `index.html` so the 37 lessons stay intact until a deliberate migration."""
+    return (Path(__file__).parent / "static" / "redesign.html").read_text()
+
+
 def _sse(event: str | None, data: dict) -> str:
     """Format one Server-Sent Event frame."""
     prefix = f"event: {event}\n" if event else ""
