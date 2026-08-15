@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import glob
 import os
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -30,16 +31,40 @@ from tokenizers import Tokenizer
 from . import rag
 
 
+def _tokenizer_roots() -> list[str]:
+    """Cache roots a bge-small embed step may have written the tokenizer to.
+
+    Different backends cache it in different places: sentence-transformers uses
+    the HF hub cache (BAAI/bge-small-en-v1.5); fastembed — what embed.py actually
+    uses — caches the ONNX repo (qdrant/bge-small-en-v1.5-onnx-q) under its own
+    cache dir (FASTEMBED_CACHE_PATH, else <tmp>/fastembed_cache). Search all so
+    token counts work regardless of which backend warmed the model."""
+    return [
+        os.path.expanduser("~/.cache/huggingface/hub"),
+        os.environ.get("FASTEMBED_CACHE_PATH", ""),
+        os.path.join(tempfile.gettempdir(), "fastembed_cache"),
+        os.path.expanduser("~/.cache/fastembed"),
+    ]
+
+
+def _find_tokenizer_path(roots: list[str] | None = None) -> str:
+    """Locate a cached bge-small ``tokenizer.json`` across known cache roots."""
+    for root in roots if roots is not None else _tokenizer_roots():
+        if not root:
+            continue
+        hits = [
+            h for h in glob.glob(os.path.join(root, "**", "tokenizer.json"), recursive=True)
+            if "bge-small" in h.lower()
+        ]
+        if hits:
+            return sorted(hits)[0]
+    raise FileNotFoundError("bge-small tokenizer not cached — run any embed step first")
+
+
 @lru_cache(maxsize=1)
 def _tokenizer() -> Tokenizer:
     """The cached bge-small WordPiece tokenizer (offline, no download)."""
-    pattern = os.path.expanduser(
-        "~/.cache/huggingface/hub/models--BAAI--bge-small-en-v1.5/snapshots/*/tokenizer.json"
-    )
-    hits = glob.glob(pattern)
-    if not hits:
-        raise FileNotFoundError("bge-small tokenizer not cached — run any embed step first")
-    return Tokenizer.from_file(hits[0])
+    return Tokenizer.from_file(_find_tokenizer_path())
 
 
 def count_tokens(text: str) -> int:
