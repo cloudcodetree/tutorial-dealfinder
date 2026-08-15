@@ -57,6 +57,23 @@ _fair = {
 _medians = _load_medians()
 
 
+@app.on_event("startup")
+def _warm_embed_model() -> None:
+    """Preload the fastembed model at boot (only when serving with a real DB) so
+    the first /semantic or /search never hangs on the lazy, unauthenticated HF
+    download in-band. Runs in a daemon thread so a slow/rate-limited download
+    delays only the embed routes (which wait on the same lock), not app startup
+    or the non-embed routes. Skipped without DATABASE_URL, so offline tests using
+    TestClient never touch the network."""
+    if not _DB:
+        return
+    import threading
+
+    from .embed import warm
+
+    threading.Thread(target=warm, name="embed-warmup", daemon=True).start()
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "products": len(_catalog)}

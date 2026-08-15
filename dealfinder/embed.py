@@ -12,6 +12,7 @@ offline and reproducible.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,11 @@ from .schema import Product
 
 _MODEL_NAME = "BAAI/bge-small-en-v1.5"
 _model = None
+# The model loads lazily and downloads ~130MB from HF on first use. Guard the
+# init so concurrent first-callers construct it ONCE — without this, a cold,
+# multi-request start races here and wedges on fastembed's download file-locks
+# (the pgvector /semantic path hang). Pair with warm() to preload at startup.
+_model_lock = threading.Lock()
 
 # Where the committed title-embedding cache for the current snapshot lives.
 _EMBED_DIR = Path(__file__).resolve().parent.parent / "data" / "embeddings"
@@ -29,10 +35,19 @@ _TITLE_CACHE = _EMBED_DIR / "electronics-2026-07.title-bge-small.npz"
 def _get_model():
     global _model
     if _model is None:
-        from fastembed import TextEmbedding
+        with _model_lock:
+            if _model is None:  # double-checked: only the first thread constructs
+                from fastembed import TextEmbedding
 
-        _model = TextEmbedding(_MODEL_NAME)
+                _model = TextEmbedding(_MODEL_NAME)
     return _model
+
+
+def warm() -> bool:
+    """Eagerly load the embedding model so the first request never pays the lazy
+    download/init cost in-band (the /semantic + /search first-call hang). Call at
+    server startup. Idempotent and thread-safe via _get_model()'s lock."""
+    return _get_model() is not None
 
 
 def product_text(p: Product) -> str:
