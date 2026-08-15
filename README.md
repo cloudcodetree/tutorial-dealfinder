@@ -63,9 +63,16 @@ docker compose down                     # stop  (add -v to also delete the pgvec
   `seed` profile once to populate it with real embeddings.
 - This supersedes running `uvicorn` / `vite` / a standalone pgvector container by hand.
 - No `docker compose` plugin? The standalone `docker-compose <same args>` binary works too.
-- **Memory:** the `/healthz`, `/endpoint` inspectors, and the `seed` profile run fine
-  on a small (2 GB) Docker VM. *Live* semantic search loads the embedding model in the
-  backend — give the VM ≥ 4 GB for that (`colima start --memory 4`) to avoid an OOM.
+- **Memory & the ML endpoints:** most of the app (`/healthz`, search, the `/auth`
+  `/billing` `/compliance` `/ops` `/evals` `/suggestions` inspectors, the SPA, the
+  `seed` profile) runs fine on a small (~2 GB) Docker VM. Three endpoints do **not**
+  from the light dev image: `/models` (needs `torch`), `/tracking` (needs `mlflow`),
+  and `/pipeline`'s `has_prefect` (needs `prefect`) — `Dockerfile.dev` omits those
+  extras on purpose. Run those three in the venv
+  (`pip install -e ".[dev,torch,mlflow,prefect]"` then `uvicorn dealfinder.serve:app`),
+  or add the extras to `Dockerfile.dev` **and** raise the Docker VM to ≥ 4 GB
+  (`colima start --memory 4`) — fitting the torch MLP will OOM/hang a 2 GB VM.
+  *Live* semantic search also wants ≥ 4 GB (it loads the embedding model).
 
 ## Steps (and what each adds)
 

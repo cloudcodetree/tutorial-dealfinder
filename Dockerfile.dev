@@ -11,6 +11,15 @@ WORKDIR /app
 # Build-time install of the project + its dependencies. At runtime the compose
 # service bind-mounts ./ over /app, so the installed deps (in site-packages) and
 # the editable finder stay, while the package source under /app/dealfinder is live.
+#
+# Kept light on purpose: the heavy ML extras (torch/mlflow/prefect) are NOT
+# installed here. They power three endpoints — /models (torch), /tracking
+# (mlflow), /pipeline (prefect) — which also want more memory than a default
+# ~2 GB Docker VM has (fitting the torch MLP will OOM/hang it). Run those three
+# in the venv (`pip install -e ".[dev,torch,mlflow,prefect]"` + uvicorn), or add
+# the extras here AND raise the Docker VM to >=4 GB. Everything else — search,
+# the /auth /billing /compliance /ops /evals /suggestions inspectors, the SPA —
+# serves fine from this light image.
 COPY . .
 RUN pip install --no-cache-dir -e .
 
