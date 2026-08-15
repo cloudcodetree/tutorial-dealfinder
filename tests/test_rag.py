@@ -5,6 +5,7 @@ test_search.py), so these tests never touch the network. Every value is pinned
 against the frozen snapshot ``data/snapshots/electronics-2026-07.json`` and the
 spec §9.1 hero-cast facts.
 """
+import pytest
 from fastapi.testclient import TestClient
 
 from dealfinder.rag import (
@@ -17,6 +18,15 @@ from dealfinder.rag import (
 )
 
 QUERY = "noise cancelling headphones under $150"
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_rag(monkeypatch):
+    """Pin these to the reproducible snapshot path (retrieve's ``use_db=False``
+    contract), independent of whether a dev ``DATABASE_URL`` is exported — the
+    pgvector path returns raw cosine order, which is the /semantic demo's job,
+    not the value-reranked RAG these tests assert."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 # ---------------------------------------------------------------------------
