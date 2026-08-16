@@ -35,6 +35,11 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 4. **Enterprise-grade engineering, consumer product.** Reliability/observability/security/
    privacy at public scale — the "enterprise" bar applies to the *engineering*, not the buyer.
 5. **The data compounds.** Every search grows the price knowledge base (the moat).
+6. **Free by default, reversible always.** A learner running this for the course pays **$0**;
+   any paid path is opt-in, priced up front, and tear-down-able. New features must not break
+   the free-by-default guarantee, and anything that *can* cost money ships with its price and
+   its teardown step. Full policy + runbook: **[COST.md](COST.md)** (`scripts/cost_check.py`
+   reports what's armed). This is a hard constraint, not an aspiration.
 
 ---
 
@@ -46,6 +51,8 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 - [ ] Observability: per-request latency + cost + error tracking, alerting.
 - [ ] Privacy: GDPR/CCPA data-subject flows + cookie consent; secrets in a manager, not `.env`.
 - [ ] Affiliate compliance (disclosure) if monetized.
+- [ ] Every deployed component's ongoing cost is documented in COST.md with a teardown step;
+      `scripts/cost_check.py` (extended for cloud) reports the live billable footprint.
 
 ---
 
