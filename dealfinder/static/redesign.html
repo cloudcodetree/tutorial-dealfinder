@@ -150,7 +150,7 @@ button{font:inherit;cursor:pointer;}
       <div class="brand">DealFinder<span>.</span></div>
       <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">nocturne redesign · wired to live endpoints</span>
       <span class="pill">free tier</span>
-      <button class="btn btn-secondary">Account</button>
+      <button class="btn btn-secondary" id="acct" type="button">Sign in</button>
     </div>
   </div>
 
@@ -159,6 +159,7 @@ button{font:inherit;cursor:pointer;}
       <div class="rail-group">
         <h6>Find</h6>
         <button class="rail-item active" data-mode="deals"><span class="bar"></span>Live deals<span class="count" id="dealsCount"></span></button>
+        <button class="rail-item" data-mode="watchlist"><span class="bar"></span>Watchlist<span class="count" id="wlCount"></span></button>
         <button class="rail-item" data-mode="semantic"><span class="bar"></span>By meaning</button>
         <button class="rail-item" data-mode="ask"><span class="bar"></span>Ask the agent</button>
         <button class="rail-item" data-mode="context"><span class="bar"></span>Context window</button>
@@ -275,6 +276,15 @@ button{font:inherit;cursor:pointer;}
         <div id="askBody"><div class="loading">Loading…</div></div>
       </section>
 
+      <!-- WATCHLIST (P1 consumer core) -->
+      <section id="view-watchlist" class="hidden">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Your watchlist</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">we flag it when the price drops to your target</span>
+        </div>
+        <div class="results" id="wlBody"><div class="loading">Loading…</div></div>
+      </section>
+
       <!-- GENERIC INSPECTOR (dataset/mlops/safety/inference/ops/auth/billing/compliance/review/context/suggestions) -->
       <section id="view-generic" class="hidden">
         <div class="section-head" style="margin-bottom:var(--space-6);">
@@ -293,8 +303,24 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const money = n => "$" + Number(n).toFixed(2);
 let state = { mode:"deals", q:"noise cancelling headphones" };
 let rankedThr = 0.70;   // suspicious-residual threshold; the backend sends the real value
+let userId = localStorage.getItem('df_user') || null;   // dev sign-in (real product: Supabase OAuth)
+let lastResults = [];   // the current deals, so a card's "watch" button can find its item
+const authHeaders = () => userId ? {'X-User-Id': userId} : {};
+function renderAcct(){ const b=document.getElementById('acct'); if(b) b.textContent = userId ? ('Sign out · ' + userId) : 'Sign in'; }
+function toggleAcct(){
+  if(userId){ userId = null; localStorage.removeItem('df_user'); }
+  else { const id = prompt('Dev sign-in — enter a user id (e.g. alice):', 'alice'); if(id && id.trim()){ userId = id.trim(); localStorage.setItem('df_user', userId); } }
+  renderAcct(); refreshWlCount();
+  loaded.watchlist = false;
+  if(state.mode === 'watchlist') loadWatchlist();
+}
+async function refreshWlCount(){
+  const el = document.getElementById('wlCount');
+  if(!userId){ if(el) el.textContent=''; return; }
+  try{ const d = await (await fetch('/watchlist', {headers: authHeaders()})).json(); if(el) el.textContent = d.count || ''; }catch(e){}
+}
 const loaded = {};
-const BESPOKE = ['deals','pipeline','evals','models','tracking','semantic','ask'];
+const BESPOKE = ['deals','pipeline','evals','models','tracking','semantic','ask','watchlist'];
 const GENERIC = {
   context:{ep:'/context',q:true,kicker:'Part 16 · context engineering',title:'The window as a token budget',sub:'What fits and what gets evicted — live from /context.'},
   review:{ep:'/review',q:true,kicker:'Part 17 · writer / reviewer',title:'Draft, critique, revise',sub:'A second-opinion agent gates the answer — live from /review.'},
@@ -317,8 +343,8 @@ function setMode(m){
   state.mode = m;
   document.querySelectorAll('.rail-item[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
   const view = BESPOKE.includes(m) ? m : 'generic';
-  ['deals','pipeline','evals','models','tracking','semantic','ask','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
-  ({deals:loadDeals,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk}[m] || (()=>loadGeneric(m)))();
+  ['deals','pipeline','evals','models','tracking','semantic','ask','watchlist','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
+  ({deals:loadDeals,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)))();
 }
 
 const mlHint = ep => `<div class="statcard"><div class="k" style="color:var(--color-neutral-500);">unavailable</div><div class="muted" style="font-size:13px;">This mode needs the full-ML profile. Start it with<br><span class="mono" style="font-size:11px;">docker compose -f docker-compose.yml -f docker-compose.full.yml up</span><br>then reopen this mode.</div></div>`;
@@ -365,6 +391,7 @@ async function loadDeals(){
     rankedThr = d.residual_threshold ?? rankedThr;
     $('#dealsCount').textContent = d.count;
     $('#meta').innerHTML = `<span class="mono">${d.count} offers · median ${money(d.median_price)} · two-signal ranked</span>`;
+    lastResults = d.results;
     const held = d.results.filter(r=>r.verdict==='suspicious').length;
     $('#results').innerHTML = d.results.map(cardHTML).join('') +
       `<button class="btn btn-secondary btn-block" style="min-height:44px;">Ranked by value · ${held} held back as too-good-to-be-true</button>`;
@@ -436,11 +463,25 @@ function cardHTML(r,i){
     </div>
     <div class="priceblock">
       <div class="price">${money(r.price)}</div>
-      ${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
+      <div style="display:flex;gap:var(--space-3);align-items:center;">
+        ${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
+        <button class="linkbtn watch-btn" data-idx="${i}">＋ watch</button>
+      </div>
     </div>
   </div>`;
 }
+async function addWatch(r, btn){
+  if(!r) return;
+  if(!userId){ toggleAcct(); if(!userId) return; }
+  try{
+    const body = {id:r.id, title:r.title, url:r.url, image_url:r.image_url, source:r.source, last_price:r.price, target_price:r.price};
+    const res = await fetch('/watchlist', {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(body)});
+    if(res.ok && btn){ btn.textContent='watching ✓'; btn.disabled=true; btn.style.color='var(--color-neutral-500)'; }
+    refreshWlCount();
+  }catch(e){}
+}
 function wireWhy(){
+  document.querySelectorAll('.watch-btn').forEach(b=>b.onclick=()=>addWatch(lastResults[b.dataset.idx], b));
   document.querySelectorAll('.why-toggle').forEach(b=>b.addEventListener('click',()=>{
     const el=$('#why-'+b.dataset.i); const open=!el.classList.contains('hidden');
     el.classList.toggle('hidden'); b.textContent = open?'why held? →':'hide ↑';
@@ -574,6 +615,50 @@ function renderInspector(d){
   return h || '<div class="loading">No data.</div>';
 }
 
+/* ── WATCHLIST (P1 consumer core) ─────────────────────────────────────── */
+async function loadWatchlist(){
+  const body = $('#wlBody');
+  if(!userId){
+    loaded.watchlist = false;
+    body.innerHTML = '<div class="loading">Sign in to save items and get price-drop alerts — use the “Sign in” button, top-right.</div>';
+    $('#wlCount').textContent = '';
+    return;
+  }
+  if(loaded.watchlist) return; loaded.watchlist = true;
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try{
+    const d = await (await fetch('/watchlist', {headers: authHeaders()})).json();
+    $('#wlCount').textContent = d.count || '';
+    if(!d.items.length){ body.innerHTML = '<div class="loading">Nothing watched yet — add items from Live deals with “＋ watch”.</div>'; return; }
+    body.innerHTML = d.items.map(wlCard).join('');
+    document.querySelectorAll('.wl-remove').forEach(b=>b.onclick=async()=>{
+      await fetch('/watchlist/' + encodeURIComponent(b.dataset.id), {method:'DELETE', headers: authHeaders()});
+      loaded.watchlist = false; loadWatchlist();
+    });
+  }catch(e){ body.innerHTML = `<div class="loading">Could not load watchlist — ${esc(e.message)}</div>`; loaded.watchlist = false; }
+}
+function wlCard(it){
+  const thumb = it.image_url ? `<img class="thumb" src="${esc(it.image_url)}" referrerpolicy="no-referrer" alt="">` : `<div class="thumb"></div>`;
+  const tag = it.hit ? '<span class="tag tag-deal">PRICE DROP</span>' : '<span class="tag tag-fair">WATCHING</span>';
+  return `<div class="card ${it.hit?'top':''}">${thumb}
+    <div class="card-body">
+      <div class="card-head">${tag} <span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(it.source||'')}</span></div>
+      <div class="title">${esc(it.title)}</div>
+      <div class="reason">target ${it.target_price!=null?money(it.target_price):'—'} · last seen ${it.last_price!=null?money(it.last_price):'—'}</div>
+    </div>
+    <div class="priceblock">
+      <div class="price">${it.last_price!=null?money(it.last_price):''}</div>
+      <div style="display:flex;gap:var(--space-3);align-items:center;">
+        ${it.url?`<a class="link-sm" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">open →</a>`:''}
+        <button class="linkbtn wl-remove" data-id="${esc(it.id)}">remove</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+document.getElementById('acct').addEventListener('click', toggleAcct);
+renderAcct();
+refreshWlCount();
 loadDeals();
 </script>
 </body>
