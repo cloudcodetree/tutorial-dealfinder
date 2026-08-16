@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel
 
 from . import pgstore
 from .aggregate import aggregate
@@ -24,7 +25,7 @@ from .features import featurize
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
 from .rag import _category_models, _load_medians
-from .tenancy import Principal, current_principal
+from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
@@ -35,6 +36,8 @@ _DB = bool(os.getenv("DATABASE_URL"))
 if _DB:
     try:
         pgstore.migrate()
+        from . import userstore
+        userstore.migrate()   # per-user private tables (watchlist), RLS by user_id
     except Exception:
         _DB = False
 
@@ -232,6 +235,50 @@ def redesign():
     real endpoints (`/ranked`, `/pipeline`, `/evals`). Kept separate from the
     course's `index.html` so the 37 lessons stay intact until a deliberate migration."""
     return (Path(__file__).parent / "static" / "redesign.html").read_text()
+
+
+# ── Consumer accounts: the per-user watchlist (P1). Private per user via RLS. ──
+class WatchIn(BaseModel):
+    id: str
+    title: str
+    url: str | None = None
+    image_url: str | None = None
+    source: str | None = None
+    target_price: float | None = None
+    last_price: float | None = None
+
+
+def _require_db() -> None:
+    if not _DB:
+        raise HTTPException(status_code=503, detail="accounts need a database (set DATABASE_URL)")
+
+
+@app.post("/watchlist")
+def watchlist_add(item: WatchIn, who: Principal = Depends(require_account)):
+    """Add (or update) an item on the signed-in user's watchlist. Store the price
+    seen now + an optional target; a price-drop is when last_price <= target_price."""
+    _require_db()
+    from . import userstore
+    return userstore.add_watch(who.user_id, item.model_dump())
+
+
+@app.get("/watchlist")
+def watchlist_list(who: Principal = Depends(require_account)):
+    """The signed-in user's watchlist. RLS guarantees they see only their own items;
+    each carries a `hit` flag when the last seen price is at or below the target."""
+    _require_db()
+    from . import userstore
+    items = userstore.list_watch(who.user_id)
+    return {"user": who.user_id, "count": len(items), "items": items}
+
+
+@app.delete("/watchlist/{item_id}")
+def watchlist_remove(item_id: str, who: Principal = Depends(require_account)):
+    _require_db()
+    from . import userstore
+    if not userstore.remove_watch(who.user_id, item_id):
+        raise HTTPException(status_code=404, detail="not on your watchlist")
+    return {"removed": item_id}
 
 
 def _sse(event: str | None, data: dict) -> str:

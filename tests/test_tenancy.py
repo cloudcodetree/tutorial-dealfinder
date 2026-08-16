@@ -11,7 +11,13 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from dealfinder.tenancy import DEFAULT_TENANT, Principal, _tenant_from_claims, current_principal
+from dealfinder.tenancy import (
+    DEFAULT_TENANT,
+    Principal,
+    _tenant_from_claims,
+    current_principal,
+    require_account,
+)
 
 SECRET = "test-jwt-secret-not-real"
 
@@ -32,6 +38,11 @@ app = FastAPI()
 @app.get("/whoami")
 def whoami(who: Principal = Depends(current_principal)):
     return {"tenant": who.tenant_id, "user": who.user_id, "role": who.role}
+
+
+@app.get("/account")
+def account(who: Principal = Depends(require_account)):
+    return {"user": who.user_id}
 
 
 client = TestClient(app)
@@ -71,3 +82,16 @@ def test_jwt_without_tenant_claim_falls_back_to_header_then_default():
     assert client.get("/whoami", headers={"Authorization": f"Bearer {tok}"}).json()["tenant"] == DEFAULT_TENANT
     both = client.get("/whoami", headers={"Authorization": f"Bearer {tok}", "X-Tenant-Id": "h-tenant"}).json()
     assert both["tenant"] == "h-tenant" and both["user"] == "u-7"
+
+
+def test_x_user_id_header_identifies_a_dev_user():
+    r = client.get("/whoami", headers={"X-User-Id": "dev-user-1"}).json()
+    assert r["user"] == "dev-user-1" and r["role"] == "user"
+
+
+def test_require_account_gates_anonymous_but_allows_identified():
+    assert client.get("/account").status_code == 401                     # anonymous → blocked
+    r = client.get("/account", headers={"X-User-Id": "dev-user-1"})
+    assert r.status_code == 200 and r.json()["user"] == "dev-user-1"     # dev header → allowed
+    tok = _token(tenant=None, sub="u-9")
+    assert client.get("/account", headers={"Authorization": f"Bearer {tok}"}).json()["user"] == "u-9"

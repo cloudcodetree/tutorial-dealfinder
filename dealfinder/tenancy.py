@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import auth
@@ -55,11 +55,14 @@ def _tenant_from_claims(claims: dict) -> str | None:
 def current_principal(
     creds: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
     x_tenant_id: str | None = Header(default=None),
+    x_user_id: str | None = Header(default=None),
 ) -> Principal:
     """FastAPI dependency: resolve the request's `Principal` (tenant + identity).
 
-    A valid token wins; otherwise fall back to the dev header, then the public
-    tenant. Drop it on any route that reads or writes tenant-owned data:
+    A valid token wins; otherwise fall back to dev headers, then the public tenant.
+    `X-User-Id` lets you exercise consumer account features locally without minting
+    a real JWT (same spirit as `X-Tenant-Id`). Drop it on any route that reads or
+    writes owned data:
 
         @app.get("/search")
         def search(q: str, who: Principal = Depends(current_principal)):
@@ -73,4 +76,16 @@ def current_principal(
             user_id=claims.get("sub"),
             role=auth._role_from_claims(claims),
         )
-    return Principal(tenant_id=x_tenant_id or DEFAULT_TENANT, user_id=None, role="anonymous")
+    return Principal(
+        tenant_id=x_tenant_id or DEFAULT_TENANT,
+        user_id=x_user_id,
+        role="user" if x_user_id else "anonymous",
+    )
+
+
+def require_account(who: Principal = Depends(current_principal)) -> Principal:
+    """Gate consumer account features (watchlist, saved searches, alerts) behind a
+    signed-in user. Anonymous public search never uses this — only personal data does."""
+    if not who.user_id:
+        raise HTTPException(status_code=401, detail="sign in to use account features")
+    return who
