@@ -62,6 +62,15 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 **DoD:** anonymous search unchanged; a logged-in user saves/watches items, sees only their own
 (RLS), and receives a price-drop alert; tests for per-user isolation + the alert job.
 
+**Progress (2026-08-15):**
+- [x] Per-user isolation primitive (RLS keyed on `user_id`; `userstore.py`).
+- [x] **Watchlist** — add/list/remove (`/watchlist`), `hit` flag when last price ≤ target;
+      per-user private (RLS), account-gated (`require_account`), dev `X-User-Id` sign-in.
+- [x] Watchlist **UI** in the Nocturne surface (＋watch on deals, watchlist view, count badge).
+- [ ] Real consumer auth (Supabase OAuth in the browser) — replace the dev `X-User-Id`.
+- [ ] Saved searches (parallel to watchlist).
+- [ ] Price-drop **alert delivery** (needs the P2 job queue: re-price watchlist → email/push).
+
 ### P2 — Scale & cost-per-query
 **Goal:** survive being popular without going broke.
 - **Caching**: Redis for `/ranked` + `/semantic` results and query embeddings (TTL); CDN for
@@ -119,5 +128,7 @@ P1's UI (the verdict already exists). P6 runs **continuously** and is the launch
 **moat** — it compounds, so start feeding it early (P1/P2 already persist searches per user),
 but the heavy model-serving/continuous-training work comes once there's traffic to learn from.
 
-**Done:** the AI value+trust layer (P4 core) and the per-user isolation primitive (P1 foundation).
-**Next:** P1 — consumer accounts + watchlist + price-drop alerts.
+**Done:** the AI value+trust layer (P4 core); per-user isolation (RLS); **P1 watchlist**
+(backend + UI + tests, per-user isolated, price-drop `hit` flag).
+**Next in P1:** real Supabase OAuth (replace dev `X-User-Id`), saved searches, then P2's
+job queue to power real price-drop **alert delivery** (re-price watchlist → email).
