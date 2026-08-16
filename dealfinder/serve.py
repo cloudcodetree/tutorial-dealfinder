@@ -24,6 +24,7 @@ from .features import featurize
 from .ingest import dedup_key
 from .live_sources import LIVE_SOURCES
 from .rag import _category_models, _load_medians
+from .tenancy import Principal, current_principal
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
@@ -80,14 +81,16 @@ def healthz():
 
 
 @app.get("/search")
-def search(q: str):
-    """Aggregate live deals across sources; persist + embed them when a DB is set."""
+def search(q: str, who: Principal = Depends(current_principal)):
+    """Aggregate live deals across sources; persist + embed them under the caller's
+    tenant when a DB is set (RLS keeps each tenant's history private)."""
     result = aggregate(q)
     if _DB and result["results"]:
         try:
             texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
-            pgstore.upsert(result["results"], _embed_texts(texts), query=q)
-            result["persisted"] = pgstore.count()
+            pgstore.upsert(result["results"], _embed_texts(texts), query=q, tenant=who.tenant_id)
+            result["persisted"] = pgstore.count(tenant=who.tenant_id)
+            result["tenant"] = who.tenant_id
         except Exception:
             pass
     return result
@@ -289,18 +292,20 @@ def search_stream(q: str):
 
 
 @app.get("/semantic")
-def semantic(q: str, k: int = 12):
-    """Search by meaning.
+def semantic(q: str, k: int = 12, who: Principal = Depends(current_principal)):
+    """Search by meaning, scoped to the caller's tenant.
 
-    With a database, searches everything ever aggregated (pgvector). Without one,
-    it falls back to in-memory value-reranked retrieval over the frozen snapshot —
-    so meaning-search works fully offline, the same way ``/ask`` does. Each result
-    carries its two-signal deal verdict so the UI can badge DEAL/SUSPICIOUS."""
+    With a database, searches everything THIS TENANT has aggregated (pgvector, with
+    RLS keeping tenants' histories isolated). Without one, it falls back to in-memory
+    value-reranked retrieval over the frozen snapshot — so meaning-search works fully
+    offline, the same way ``/ask`` does. Each result carries its two-signal deal
+    verdict so the UI can badge DEAL/SUSPICIOUS."""
     if _DB:
-        rows = pgstore.semantic_search(_embed_texts([q])[0], k=k)
+        rows = pgstore.semantic_search(_embed_texts([q])[0], k=k, tenant=who.tenant_id)
         for r in rows:
             r["similarity"] = round(float(r["similarity"]), 3)
-        return {"query": q, "count": len(rows), "results": rows, "backend": "pgvector"}
+        return {"query": q, "count": len(rows), "results": rows,
+                "backend": "pgvector", "tenant": who.tenant_id}
 
     # Offline fallback: the Part 5 retriever over the snapshot (Part 15's `retrieve`).
     from .rag import retrieve
