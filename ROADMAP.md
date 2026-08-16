@@ -35,11 +35,15 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 4. **Enterprise-grade engineering, consumer product.** Reliability/observability/security/
    privacy at public scale — the "enterprise" bar applies to the *engineering*, not the buyer.
 5. **The data compounds.** Every search grows the price knowledge base (the moat).
-6. **Free by default, reversible always.** A learner running this for the course pays **$0**;
-   any paid path is opt-in, priced up front, and tear-down-able. New features must not break
-   the free-by-default guarantee, and anything that *can* cost money ships with its price and
-   its teardown step. Full policy + runbook: **[COST.md](COST.md)** (`scripts/cost_check.py`
-   reports what's armed). This is a hard constraint, not an aspiration.
+6. **Respect the operator's budget — money *and* machine — bounded, visible, reclaimable.**
+   A learner runs the course for **$0** and on a **modest laptop**; both budgets are bounded
+   by default, legible *before* they bite, and reclaimable on demand. Any paid path is opt-in,
+   priced up front, and tear-down-able ([COST.md](COST.md), `scripts/cost_check.py`); the disk/
+   RAM footprint is bounded, monitored, and prunable ([RESOURCES.md](RESOURCES.md),
+   `scripts/disk_check.py`). New features must not break either guarantee, and anything that can
+   spend money **or** balloon disk ships with its number and its teardown/reclaim step. These
+   are hard constraints, not aspirations — the disk-full VM corruption we hit is exactly what
+   ignoring the machine budget costs.
 
 ---
 

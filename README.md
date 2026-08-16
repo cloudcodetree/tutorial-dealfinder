@@ -15,18 +15,23 @@ Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.c
 - **Part 13 — [Containerize & deploy](https://cloudcodetree.com/tutorials/dealfinder-deploy/)**: a Dockerfile, GitHub Actions CD with an eval gate, and a PaaS config.
 - **Part 14 — [Observability & cost](https://cloudcodetree.com/tutorials/dealfinder-observability/)**: per-model cost attribution, budget alerts, and PSI drift detection.
 
-## Cost — free by default
+## Cost & footprint — free and frugal by default
 
-Running DealFinder for the whole course costs **$0**. The default LLM tier is free-only
-(and it degrades to deterministic logic with no key at all), live search runs on
-keyless/free tiers plus a snapshot fallback, and every paid source is off unless you
-explicitly set `DEALFINDER_ENABLE_PAID_SOURCES=1`. Every paid path — and how to tear the
-whole thing back down to $0 when you're done — is laid out in **[COST.md](COST.md)**.
+Running DealFinder for the whole course costs **$0** and fits a **modest laptop**. Both
+budgets — money and machine — are bounded by default, visible before they bite, and
+reclaimable when you're done:
 
-Check what your environment would spend before you run anything:
+- **Cost:** free-only LLM tier (degrades to deterministic with no key), keyless/free sources
+  + snapshot fallback, paid sources off unless you set `DEALFINDER_ENABLE_PAID_SOURCES=1`.
+  Full policy + teardown → **[COST.md](COST.md)**.
+- **Disk/RAM:** light default image, opt-in full-ML profile, download-once model cache, and a
+  bounded VM. Footprint + reclaim runbook → **[RESOURCES.md](RESOURCES.md)**.
+
+Check both before you run anything:
 
 ```bash
 python scripts/cost_check.py      # "no paid surfaces armed — you're at $0", or a priced warning
+python scripts/disk_check.py      # host/VM headroom; warns before a heavy build fills the disk
 ```
 
 ## Run it
