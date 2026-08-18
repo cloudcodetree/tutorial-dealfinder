@@ -75,15 +75,31 @@ docker system prune -af && docker builder prune -af
 docker compose down -v
 docker compose -f docker-compose.yml -f docker-compose.full.yml down -v   # if you used full-ML
 
-# 3. DEEP: recreate the VM to shrink the on-host image (~/.colima) back to ~a couple GiB.
-#    DESTRUCTIVE — deletes all Docker data in the VM (volumes included). Back up first,
-#    and DON'T do this if other Docker stacks share the same VM.
-colima delete && colima start --cpu 4 --memory 4 --disk 40
+# 3. DEEP: shrink/bound the Docker DATA DISK. DESTRUCTIVE — wipes all Docker volumes AND
+#    images. Back up volumes first (below); don't do this if other stacks share the VM
+#    without backing theirs up too.
+#
+#    GOTCHA (verified 2026-08): Colima keeps Docker data on a SEPARATE persistent disk
+#    (~/.colima/_lima/_disks/colima/datadisk). `colima delete` does NOT remove it and
+#    `colima start --disk N` REUSES it without resizing — so "delete + start --disk 40"
+#    silently leaves the old (e.g. 100 GiB) cap. To actually bound it, remove the datadisk:
+docker compose down -v                                    # (+ any other stacks)
+mkdir -p ~/vol-backup                                     # back up every volume to keep:
+for v in $(docker volume ls -q); do \
+  docker run --rm -v "$v":/from alpine tar czf - -C /from . > ~/vol-backup/"$v".tar.gz; done
+colima stop && colima delete --force
+rm -rf ~/.colima/_lima/_disks/colima                      # the 100 GiB datadisk — the actual fix
+colima start --cpu 4 --memory 6 --disk 40                 # fresh datadisk, capped at 40 GiB
+docker pull alpine                                        # restore each volume:
+for f in ~/vol-backup/*.tar.gz; do v=$(basename "$f" .tar.gz); \
+  docker volume create "$v" >/dev/null; \
+  docker run --rm -i -v "$v":/to alpine tar xzf - -C /to < "$f"; done
 ```
 
-> ⚠ Pruning/`down -v` free space *inside* the VM, but the on-host `~/.colima` image
-> doesn't shrink — it just reuses the freed space. Only recreating the VM (step 3) or
-> a host-level trim shrinks the file itself. That's why bounding the cap up front matters.
+> ⚠ Pruning/`down -v` free space *inside* the VM, but the on-host datadisk file doesn't
+> shrink — it just reuses the freed space. Only recreating the datadisk (step 3, removing
+> `_disks/colima`) shrinks the file and lowers the cap. That's why bounding it up front
+> matters — pick `--disk 40` (a size the host can afford) at first `colima start`.
 
 If the VM ever won't start with I/O errors after a fill: `colima restart` runs an fsck on
 remount and usually recovers it without data loss (then prune).
