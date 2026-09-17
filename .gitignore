@@ -7,3 +7,7 @@ __pycache__/
 dealfinder.sqlite
 
 .env
+
+# Local `uv` resolution artifact. The course installs with `pip install -e ".[dev]"`
+# (README, Dockerfiles, CI) — nothing here uses uv, so a committed lock would only rot.
+uv.lock

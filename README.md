@@ -1,19 +1,19 @@
 # DealFinder — companion code
 
-Companion code for the **[DealFinder — AI Engineering](https://cloudcodetree.com/tutorials/)** tutorial series on cloudcodetree.com. One repo, built up **version by version** — each step is a git tag, and `main` is the finished version.
+Companion code for the **[Become a Full-Stack AI Engineer](https://cloudcodetree.com/tutorials/)** tutorial series on cloudcodetree.com. One repo, built up **version by version** — each step is a git tag, and `main` is the finished version.
 
-- **Part 1 — [Build the Data Layer](https://cloudcodetree.com/tutorials/dealfinder-data-layer/)**: ingest messy product/price data from a **dataset**, a **live API**, and a **scraper** behind one `DealSource` interface; normalize, dedup, and store it.
-- **Part 3 — ["Is it a good deal?" price model](https://cloudcodetree.com/tutorials/dealfinder-deal-model/)**: learn a fair price from features with a from-scratch linear model, evaluate it, and flag underpriced listings.
-- **Part 4 — [Recommender](https://cloudcodetree.com/tutorials/dealfinder-recommender/)**: content-based + collaborative filtering, scored offline with precision@k and NDCG.
-- **Part 5 — [Semantic search](https://cloudcodetree.com/tutorials/dealfinder-search/)**: real neural embeddings (fastembed) + BM25, fused with RRF, then reranked by value.
-- **Part 6 — [Structured extraction](https://cloudcodetree.com/tutorials/dealfinder-extraction/)**: messy listing → schema-validated JSON (Pydantic), deterministic offline + an LLM path.
-- **Part 8 — [The agent](https://cloudcodetree.com/tutorials/dealfinder-agent/)**: a ReAct loop over tools (text-to-SQL + deal ranking), with a human-in-the-loop gate.
-- **Part 9 — [MCP server](https://cloudcodetree.com/tutorials/dealfinder-mcp/)**: expose the tools over the Model Context Protocol — callable from Claude Code.
-- **Part 10 — [Safety & governance](https://cloudcodetree.com/tutorials/dealfinder-safety/)**: prompt-injection detection, PII redaction, output validation, audit log.
-- **Part 11 — [Evaluation harness](https://cloudcodetree.com/tutorials/dealfinder-eval/)**: a golden set, exact-match/field metrics, A/B comparison, and a CI gate.
-- **Part 12 — [Serve efficiently](https://cloudcodetree.com/tutorials/dealfinder-serve/)**: a FastAPI service + a semantic cache; streaming/batching/vLLM notes.
-- **Part 13 — [Containerize & deploy](https://cloudcodetree.com/tutorials/dealfinder-deploy/)**: a Dockerfile, GitHub Actions CD with an eval gate, and a PaaS config.
-- **Part 14 — [Observability & cost](https://cloudcodetree.com/tutorials/dealfinder-observability/)**: per-model cost attribution, budget alerts, and PSI drift detection.
+The written course is **37 parts**, grouped into five phases. Each part links to its
+lesson on cloudcodetree.com; the course is still being written, so lesson links go live
+as parts are published.
+
+- **Parts 1–9 — Data & the deal signal** ([start](https://cloudcodetree.com/tutorials/dealfinder-part-01/)): the `DealSource` interface, normalization and dedup over a frozen 270-item electronics snapshot, how LLMs actually work, a from-scratch price model, recommenders, semantic search, structured extraction, live connectors, responsible scraping, and tiered aggregation with a circuit breaker.
+- **Parts 10–17 — LLM engineering** ([start](https://cloudcodetree.com/tutorials/dealfinder-part-10/)): QLoRA fine-tuning of the extractor, a ReAct agent over real tools, an MCP server, pgvector persistence, RAG and agentic RAG, context engineering, and the writer/reviewer multi-agent pattern.
+- **Parts 18–24 — Product surface & ML operations** ([start](https://cloudcodetree.com/tutorials/dealfinder-part-18/)): the web app, dataset engineering (labeling, grouped splits, class imbalance), Prefect/dbt pipelines, ML & DL breadth, experiment tracking and a model registry, evaluation as a discipline, and closing the MLOps loop.
+- **Parts 25–30 — Production engineering** ([start](https://cloudcodetree.com/tutorials/dealfinder-part-25/)): safety, security and governance; serving it fast and cheap; real inference optimization; containers; cloud and Kubernetes; observability, cost and ops.
+- **Parts 31–37 — SaaS & shipping** ([start](https://cloudcodetree.com/tutorials/dealfinder-part-31/)): the React front end, auth and accounts, saved searches and a suggestions worker, payments and SaaS mechanics, security and compliance at scale, operating the real system, and a closing case study + system-design interview.
+
+The code below is built in **38 tagged steps** — finer-grained than the parts, so one
+lesson may span several tags. The full step table is at the bottom of this README.
 
 ## Cost & footprint — free and frugal by default
 
