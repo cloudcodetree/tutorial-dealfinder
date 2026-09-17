@@ -8,7 +8,7 @@ and a prompt template. Run as: `python -m dealfinder.mcp_server`.
 """
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from .dealmodel import LinearModel
 from .dealscore import fair_price, median_signal, residual_fraction, verdict
@@ -38,7 +38,7 @@ def _fair_price(p) -> float:
     return fair_price(model, featurize(p)) if model else p.price
 
 
-mcp = FastMCP("dealfinder")
+mcp = MCPServer("dealfinder")
 
 
 @mcp.tool()

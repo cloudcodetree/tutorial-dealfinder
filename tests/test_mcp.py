@@ -1,3 +1,5 @@
+import asyncio
+
 from dealfinder import mcp_server
 
 
@@ -6,7 +8,9 @@ def _id(needle):
 
 
 def test_server_registers_expected_tools():
-    names = {t.name for t in mcp_server.mcp._tool_manager.list_tools()}
+    # mcp 2.x exposes list_tools() publicly (and async); the private _tool_manager
+    # the v1 API used is gone.
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
     assert names == {"score_deal", "recommend", "search_deals"}
 
 

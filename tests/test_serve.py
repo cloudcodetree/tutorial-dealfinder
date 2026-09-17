@@ -1,5 +1,6 @@
 from urllib.parse import quote
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dealfinder.cache import SemanticCache
@@ -169,6 +170,8 @@ def test_pipeline_endpoint_runs_the_five_stages():
 
 def test_models_endpoint_reports_the_gbdt_lift():
     # Part 21 surface: linear vs GBDT+embeddings, the hand-only loss, and the MLP.
+    # The MLP leg needs the optional torch extra; skip when it is not installed.
+    pytest.importorskip("torch")
     r = client.get("/models")
     assert r.status_code == 200
     b = r.json()
@@ -183,7 +186,6 @@ def test_models_endpoint_reports_the_gbdt_lift():
 
 def test_tracking_endpoint_reports_the_ledger_and_winner():
     # Part 22 surface: the MLflow run ledger with the registered winner.
-    from dealfinder.tracking import mlflow_available
     r = client.get("/tracking")
     assert r.status_code == 200
     b = r.json()

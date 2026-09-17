@@ -10,9 +10,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
-      - run: ruff check .
+      # Correctness first: style used to run ahead of the tests, so a lint failure
+      # skipped pytest entirely and a real breakage (the mcp 2.x rename) sat hidden
+      # behind red CI for weeks. Tests and the eval gate now always report.
       - run: pytest -q
       - run: python -m dealfinder.run_evals   # quality gate — fails the build on regression
+      - run: ruff check .
 
   deploy:
     needs: test

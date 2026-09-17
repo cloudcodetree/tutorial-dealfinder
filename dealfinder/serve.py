@@ -1064,7 +1064,8 @@ def _models_report() -> dict:
     from dealfinder.dealmodel import LinearModel
     from dealfinder.features import feature_matrix
     prods = M.load_products()
-    X = feature_matrix(prods); y = np.asarray([p.price for p in prods], float)
+    X = feature_matrix(prods)
+    y = np.asarray([p.price for p in prods], float)
     tr, te = M._split(len(prods))
     lin = LinearModel().fit(X[tr], y[tr])
     emb = M._aligned_embeddings(prods)

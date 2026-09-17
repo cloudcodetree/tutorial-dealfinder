@@ -73,6 +73,9 @@ def test_forecast_needs_two_points():
 
 
 def test_torch_pricehead_is_a_real_trained_loop():
+    # torch is an optional extra (`pip install -e ".[torch]"`); the default dev
+    # install and Dockerfile.dev omit it on purpose, so skip rather than fail.
+    pytest.importorskip("torch")
     r = train_torch_pricehead()
     assert r.real is True  # torch runs here — a real autograd loop, not anchored
     assert r.n_train == 202 and r.n_test == 68 and r.epochs == 300
