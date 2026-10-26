@@ -553,35 +553,41 @@ def ops_report():
 def _auth_report() -> dict:
     """Drive the canonical Supabase-JWT scenarios through auth.py — Part 32. Cached, offline.
 
-    Mints HS256 tokens with a throwaway demo secret (never the learner's real
-    SUPABASE_JWT_SECRET) and runs each through the real verifier, so every verdict
-    below is produced by dealfinder/auth.py — not hard-coded."""
+    Mints ES256 tokens with a throwaway demo key and verifies each against that
+    key's JWK Set through the real verifier (auth.verify_with_jwks), the same
+    checks a live project's JWKS gets. No global state changes and no network,
+    so every verdict below is produced by dealfinder/auth.py — not hard-coded."""
     import time
 
     import jwt
+    from cryptography.hazmat.primitives.asymmetric import ec
 
     from . import auth as A
 
-    demo_secret = "demo-inspector-secret-not-supabase"
+    demo_issuer = "https://demo-ref.supabase.co/auth/v1"
+    demo_key = ec.generate_private_key(ec.SECP256R1())
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    jwk = jwt.algorithms.ECAlgorithm.to_jwk(demo_key.public_key(), as_dict=True)
+    demo_jwks = {"keys": [{**jwk, "kid": "demo-kid", "alg": "ES256", "use": "sig"}]}
     now = int(time.time())
 
-    def _mint(secret=demo_secret, *, sub="user-123", email="a@b.com",
-              role="free", exp_delta=3600, drop_sub=False):
+    def _claims(*, sub="user-123", email="a@b.com", role="free", exp_delta=3600, drop_sub=False):
         claims = {
-            "sub": sub, "email": email, "aud": A._AUDIENCE,
+            "sub": sub, "email": email, "aud": A._AUDIENCE, "iss": demo_issuer,
             "iat": now, "exp": now + exp_delta,
             "app_metadata": {"plan": role},
         }
         if drop_sub:
             claims.pop("sub")
-        return jwt.encode(claims, secret, algorithm=A._ALGO)
+        return claims
+
+    def _mint(key=demo_key, **kw):
+        return jwt.encode(_claims(**kw), key, algorithm="ES256", headers={"kid": "demo-kid"})
 
     def _verify(token, need_role=None):
         """Run the exact require_user / require_role logic, minus the HTTP layer."""
-        prev = os.environ.get("SUPABASE_JWT_SECRET")
-        os.environ["SUPABASE_JWT_SECRET"] = demo_secret
         try:
-            claims = A._decode(token)  # HS256 signature + expiry + audience
+            claims = A.verify_with_jwks(token, demo_jwks, issuer=demo_issuer)
             sub = claims.get("sub")
             if not sub:
                 raise HTTPException(status_code=401, detail="token missing subject")
@@ -591,19 +597,16 @@ def _auth_report() -> dict:
             return {"status": 200, "user": {"id": user.id, "email": user.email, "role": user.role}}
         except HTTPException as exc:
             return {"status": exc.status_code, "detail": exc.detail}
-        finally:
-            if prev is None:
-                os.environ.pop("SUPABASE_JWT_SECRET", None)
-            else:
-                os.environ["SUPABASE_JWT_SECRET"] = prev
 
     tampered = _mint()
     tampered = tampered[:-3] + ("aaa" if tampered[-3:] != "aaa" else "bbb")
+    forged = jwt.encode(_claims(role="pro"), "guessed-secret", algorithm="HS256", headers={"kid": "demo-kid"})
 
     return {
-        "algo": A._ALGO,
+        "algo": "ES256",
         "audience": A._AUDIENCE,
-        "secret_source": "SUPABASE_JWT_SECRET (a throwaway demo secret is used here, never your real one)",
+        "key_source": "the project JWKS at {SUPABASE_URL}/auth/v1/.well-known/jwks.json "
+                      "(a throwaway demo key is used here)",
         "scenarios": [
             {"name": "valid · pro", "note": "well-formed token, app_metadata.plan=pro",
              "result": _verify(_mint(sub="u1", email="pro@x.com", role="pro"))},
@@ -613,8 +616,10 @@ def _auth_report() -> dict:
              "result": _verify(_mint(exp_delta=-10))},
             {"name": "tampered", "note": "last 3 signature chars flipped",
              "result": _verify(tampered)},
-            {"name": "wrong secret", "note": "signed with a different secret",
-             "result": _verify(_mint(secret="some-other-secret"))},
+            {"name": "wrong key", "note": "signed by a different private key, same kid",
+             "result": _verify(_mint(key=other_key))},
+            {"name": "HS256 forgery", "note": "alg switched to HS256 with a guessed secret",
+             "result": _verify(forged)},
             {"name": "missing subject", "note": "no sub claim",
              "result": _verify(_mint(drop_sub=True))},
             {"name": "role gate: free → /pro", "note": "require_role('pro') on a free user",
@@ -630,10 +635,10 @@ def auth_report():
     """Auth & accounts (Part 32): every JWT verdict, made visible.
 
     Drives canonical Supabase-style tokens — valid pro/free, expired, tampered,
-    wrong-secret, missing-subject, and the free/pro role gate — through the real
+    wrong-key, HS256-forgery, missing-subject, and the free/pro role gate — through the real
     dealfinder/auth.py verifier: 200 with a User, 401 for bad tokens, 403 for a
-    valid token lacking the role. Deterministic, offline, cached — uses a
-    throwaway demo secret, never your SUPABASE_JWT_SECRET."""
+    valid token lacking the role. Offline and cached: tokens are signed with a
+    throwaway demo key and verified against its JWK Set."""
     return _auth_report()
 
 
@@ -1177,7 +1182,7 @@ def me(user: User = Depends(require_user)):
     """Demo protected route (Part 32). Returns the caller identity from their
     verified Supabase JWT. Auth is *opt-in* per route — the public search/deal
     routes above stay open; only routes that depend on `require_user` are gated.
-    Runs live with the learner's own SUPABASE_JWT_SECRET."""
+    Runs live with the learner's own SUPABASE_URL (its JWKS verifies the token)."""
     return {"id": user.id, "email": user.email, "role": user.role}
 
 

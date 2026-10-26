@@ -1,12 +1,9 @@
 """Multi-tenancy — tenant RESOLUTION (offline). The ENFORCEMENT half (RLS) is
 proven in tests/test_pgstore.py, which runs when a DB is reachable.
 
-Same throwaway-HS256 scheme as test_auth: mint tokens locally, exercise the real
-dependency, never touch the network.
+Same offline ES256 scheme as test_auth (the `mint` fixture): mint tokens locally,
+exercise the real dependency, never touch the network.
 """
-import time
-
-import jwt
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -19,17 +16,14 @@ from dealfinder.tenancy import (
     require_account,
 )
 
-SECRET = "test-jwt-secret-not-real"
+_minter = None
 
 
 def _token(tenant=None, sub="user-1", role="pro"):
-    now = int(time.time())
     app_meta = {"plan": role}
     if tenant is not None:
         app_meta["tenant"] = tenant
-    claims = {"sub": sub, "aud": "authenticated", "iat": now, "exp": now + 3600,
-              "app_metadata": app_meta}
-    return jwt.encode(claims, SECRET, algorithm="HS256")
+    return _minter(sub, app_metadata=app_meta)
 
 
 app = FastAPI()
@@ -49,8 +43,9 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def _secret(monkeypatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", SECRET)
+def _tokens(mint):
+    global _minter
+    _minter = mint
 
 
 def test_tenant_from_claims_reads_common_shapes():

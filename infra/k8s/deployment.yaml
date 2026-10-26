@@ -28,7 +28,7 @@ spec:
             - name: http
               containerPort: 8000
           # Config + secrets flow in as env, exactly like the Terraform stack's
-          # container env. The app reads DATABASE_URL, SUPABASE_JWT_SECRET, the
+          # container env. The app reads DATABASE_URL, SUPABASE_URL, the
           # Stripe keys, and the live-source keys from the environment.
           envFrom:
             - configMapRef:

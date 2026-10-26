@@ -1,41 +1,19 @@
-"""Offline auth tests (Part 32).
+"""Offline auth tests (Part 32): Supabase ES256 JWTs verified against JWKS.
 
-No network, no live Supabase. We mint tokens with a throwaway secret via the
-same HS256 scheme Supabase uses, then exercise the real verifier. Live use needs
-the learner's own SUPABASE_JWT_SECRET; the logic under test is identical.
+No network, no live Supabase. The `mint` fixture signs tokens with a per-session
+P-256 key and registers its public JWK, so the real verifier runs exactly as it
+does against a project's /auth/v1/.well-known/jwks.json.
 """
 import time
 
 import jwt
-import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
+from dealfinder import auth
 from dealfinder.auth import User, require_role, require_user
+from tests.conftest import bearer
 
-SECRET = "test-jwt-secret-not-real"
-
-
-def _token(secret=SECRET, *, sub="user-123", email="a@b.com", role="free", exp_delta=3600, **extra):
-    now = int(time.time())
-    claims = {
-        "sub": sub,
-        "email": email,
-        "aud": "authenticated",
-        "iat": now,
-        "exp": now + exp_delta,
-        "app_metadata": {"plan": role},
-        **extra,
-    }
-    return jwt.encode(claims, secret, algorithm="HS256")
-
-
-@pytest.fixture(autouse=True)
-def _secret(monkeypatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", SECRET)
-
-
-# --- a tiny app that mounts the real dependencies --------------------------
 app = FastAPI()
 
 
@@ -52,42 +30,52 @@ def pro(user: User = Depends(require_role("pro"))):
 client = TestClient(app)
 
 
-def _auth(tok):
-    return {"Authorization": f"Bearer {tok}"}
+def test_valid_token_returns_user(mint):
+    r = client.get("/me", headers=bearer(mint("user-123", email="a@b.com", app_metadata={"plan": "pro"})))
+    assert r.status_code == 200 and r.json() == {"id": "user-123", "email": "a@b.com", "role": "pro"}
 
 
-def test_valid_token_returns_user():
-    r = client.get("/me", headers=_auth(_token(sub="u1", email="x@y.com", role="pro")))
-    assert r.status_code == 200
-    assert r.json() == {"id": "u1", "email": "x@y.com", "role": "pro"}
+def test_expired_token(mint):
+    r = client.get("/me", headers=bearer(mint(exp_delta=-10)))
+    assert (r.status_code, r.json()["detail"]) == (401, "token expired")
 
 
-def test_expired_token_is_401():
-    r = client.get("/me", headers=_auth(_token(exp_delta=-10)))
-    assert r.status_code == 401
-    assert "expired" in r.json()["detail"]
+def test_wrong_issuer(mint):
+    assert client.get("/me", headers=bearer(mint(iss="https://evil.supabase.co/auth/v1"))).status_code == 401
 
 
-def test_tampered_token_is_401():
-    tok = _token()
-    tampered = tok[:-3] + ("aaa" if tok[-3:] != "aaa" else "bbb")
-    r = client.get("/me", headers=_auth(tampered))
-    assert r.status_code == 401
+def test_wrong_audience(mint):
+    assert client.get("/me", headers=bearer(mint(aud="anon"))).status_code == 401
 
 
-def test_wrong_secret_is_401():
-    r = client.get("/me", headers=_auth(_token(secret="some-other-secret")))
-    assert r.status_code == 401
+def test_unknown_kid(mint):
+    assert client.get("/me", headers=bearer(mint(kid="other-kid"))).status_code == 401
 
 
-def test_missing_bearer_is_rejected():
-    # HTTPBearer(auto_error=True) rejects a request with no credentials
-    # (401 Not authenticated) before the route body ever runs.
-    assert client.get("/me").status_code == 401
+def test_hs256_token_is_rejected(mint):
+    forged = jwt.encode({"sub": "x", "aud": "authenticated", "iss": "https://demo-ref.supabase.co/auth/v1",
+                         "exp": int(time.time()) + 60}, "any-secret", algorithm="HS256")
+    assert client.get("/me", headers=bearer(forged)).status_code == 401
 
 
-def test_require_role_allows_pro_blocks_free():
-    assert client.get("/pro", headers=_auth(_token(role="pro"))).status_code == 200
-    r = client.get("/pro", headers=_auth(_token(role="free")))
-    assert r.status_code == 403
-    assert "requires role 'pro'" in r.json()["detail"]
+def test_alg_none_is_rejected(mint):
+    unsigned = jwt.encode({"sub": "x", "aud": "authenticated", "exp": int(time.time()) + 60}, None, algorithm="none")
+    assert client.get("/me", headers=bearer(unsigned)).status_code == 401
+
+
+def test_jwks_unreachable_fails_closed(mint, monkeypatch):
+    token = mint()
+    auth.set_jwks_for_testing(None)
+    monkeypatch.setenv("SUPABASE_URL", "http://127.0.0.1:9")
+    r = client.get("/me", headers=bearer(token))
+    assert (r.status_code, r.json()["detail"]) == (503, "auth unavailable")
+
+
+def test_missing_supabase_url_fails_closed(mint, monkeypatch):
+    token = mint()
+    monkeypatch.delenv("SUPABASE_URL")
+    assert client.get("/me", headers=bearer(token)).status_code == 503
+
+
+def test_role_gate_forbids_other_plans(mint):
+    assert client.get("/pro", headers=bearer(mint(app_metadata={"plan": "free"}))).status_code == 403

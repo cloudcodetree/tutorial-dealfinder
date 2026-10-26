@@ -276,14 +276,15 @@ def test_auth_endpoint_reports_every_jwt_verdict():
     r = client.get("/auth")
     assert r.status_code == 200
     b = r.json()
-    assert b["algo"] == "HS256" and b["audience"] == "authenticated"
+    assert b["algo"] == "ES256" and b["audience"] == "authenticated"
     by_name = {s["name"]: s["result"] for s in b["scenarios"]}
     assert by_name["valid · pro"]["status"] == 200
     assert by_name["valid · pro"]["user"] == {"id": "u1", "email": "pro@x.com", "role": "pro"}
     assert by_name["valid · free"]["user"]["role"] == "free"
     assert by_name["expired"] == {"status": 401, "detail": "token expired"}
     assert by_name["tampered"] == {"status": 401, "detail": "invalid token"}
-    assert by_name["wrong secret"] == {"status": 401, "detail": "invalid token"}
+    assert by_name["wrong key"] == {"status": 401, "detail": "invalid token"}
+    assert by_name["HS256 forgery"] == {"status": 401, "detail": "invalid token"}
     assert by_name["missing subject"] == {"status": 401, "detail": "token missing subject"}
     assert by_name["role gate: free → /pro"] == {"status": 403, "detail": "requires role 'pro'"}
     assert by_name["role gate: pro → /pro"]["status"] == 200

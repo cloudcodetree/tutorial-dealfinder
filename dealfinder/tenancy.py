@@ -69,7 +69,7 @@ def current_principal(
             ...
     """
     if creds is not None:
-        claims = auth._decode(creds.credentials)  # verifies signature + expiry, or 401
+        claims = auth.verify_token(creds.credentials)  # JWKS-verified, or 401/503
         tenant = _tenant_from_claims(claims) or x_tenant_id or DEFAULT_TENANT
         return Principal(
             tenant_id=tenant,

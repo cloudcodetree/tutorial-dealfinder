@@ -1,18 +1,26 @@
-"""Auth & accounts (Part 32) — verifying Supabase-issued JWTs.
+"""Auth & accounts (Part 32) — verifying Supabase-issued JWTs against JWKS.
 
-This is the real, standard Supabase pattern: Supabase Auth signs every session
-JWT with your project's JWT secret (HS256). Your API trusts a request by
-verifying that signature with the same secret — no call back to Supabase needed
-on the hot path. The secret lives in `SUPABASE_JWT_SECRET` (Project Settings →
-API → JWT Secret in the Supabase dashboard).
+Supabase Auth signs every session JWT with the project's asymmetric signing key
+(ES256; RS256 also accepted) and publishes the public half at
+`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`. The API verifies the signature,
+expiry, issuer (`{SUPABASE_URL}/auth/v1`) and audience (`authenticated`) with that
+public key. No shared secret exists anywhere, and the keys are cached for 10
+minutes, so the hot path never calls Supabase.
+
+This replaces Part 32's earlier HS256 shared-secret pattern (`SUPABASE_JWT_SECRET`).
+Only ES256/RS256 are accepted, so an HS256 or `alg: none` token can never be
+forged into a valid one.
+
+Fail closed: no `SUPABASE_URL`, or a JWKS that can't be fetched, is a 503
+`auth unavailable` — never a silent accept. A bad token is a 401.
 
 `require_user` is a FastAPI dependency: drop it on any route and the route only
 runs for a caller holding a valid, unexpired Supabase token. `require_role`
 builds an RBAC gate on top (free vs. pro, etc.).
 
-Runs live only with the learner's OWN Supabase project (set SUPABASE_JWT_SECRET
-to that project's secret). The tests in `tests/test_auth.py` are fully offline:
-they mint tokens with a throwaway secret and never touch the network.
+The tests in `tests/test_auth.py` are fully offline: the `mint` fixture signs
+tokens with a throwaway P-256 key and registers its JWK via
+`set_jwks_for_testing`.
 """
 from __future__ import annotations
 
@@ -23,11 +31,13 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-# Supabase signs session tokens with HS256 and the audience "authenticated".
-_ALGO = "HS256"
+_ALGORITHMS = ["ES256", "RS256"]
 _AUDIENCE = "authenticated"
 
 _bearer = HTTPBearer(auto_error=True)
+
+_test_jwks: jwt.PyJWKSet | None = None
+_clients: dict[str, jwt.PyJWKClient] = {}
 
 
 class User(BaseModel):
@@ -38,28 +48,78 @@ class User(BaseModel):
     role: str = "free"  # app-level role; we read it from a custom claim (see below)
 
 
-def _jwt_secret() -> str:
-    secret = os.getenv("SUPABASE_JWT_SECRET")
-    if not secret:
-        # Fail loud rather than silently accepting unsigned tokens.
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET not configured")
-    return secret
+def _unavailable() -> HTTPException:
+    return HTTPException(status_code=503, detail="auth unavailable")
 
 
-def _decode(token: str) -> dict:
-    """Verify signature + expiry with the project secret; raise 401 on any problem."""
+def _supabase_url() -> str:
+    url = os.getenv("SUPABASE_URL")
+    if not url:
+        raise _unavailable()
+    return url.rstrip("/")
+
+
+def jwks_url() -> str:
+    """The project's public signing keys."""
+    return f"{_supabase_url()}/auth/v1/.well-known/jwks.json"
+
+
+def set_jwks_for_testing(jwks: dict | None) -> None:
+    """Verify against this JWK Set instead of fetching one. `None` restores fetching."""
+    global _test_jwks
+    _test_jwks = jwt.PyJWKSet.from_dict(jwks) if jwks is not None else None
+
+
+def _client(url: str) -> jwt.PyJWKClient:
+    if url not in _clients:
+        _clients[url] = jwt.PyJWKClient(url, cache_keys=True, lifespan=600, timeout=5)
+    return _clients[url]
+
+
+def _key_from_set(token: str, keyset: jwt.PyJWKSet) -> jwt.PyJWK:
+    kid = jwt.get_unverified_header(token).get("kid")
     try:
-        return jwt.decode(
-            token,
-            _jwt_secret(),
-            algorithms=[_ALGO],
-            audience=_AUDIENCE,
-        )
+        return keyset[kid]
+    except KeyError as exc:
+        raise jwt.PyJWKClientError(f"no signing key with kid {kid!r}") from exc
+
+
+def decode_claims(token: str, key, issuer: str) -> dict:
+    """Verify one token against one public key; 401 on any problem."""
+    try:
+        return jwt.decode(token, key, algorithms=_ALGORITHMS, audience=_AUDIENCE, issuer=issuer)
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(status_code=401, detail="token expired") from exc
-    except jwt.InvalidTokenError as exc:
-        # Covers tampering, wrong secret, bad audience, malformed token, etc.
+    except jwt.PyJWTError as exc:
+        # Covers tampering, wrong key, wrong alg, bad issuer/audience, malformed token.
         raise HTTPException(status_code=401, detail="invalid token") from exc
+
+
+def verify_with_jwks(token: str, jwks: dict, issuer: str) -> dict:
+    """Verify a token against an explicit JWK Set. No global state, no network."""
+    try:
+        key = _key_from_set(token, jwt.PyJWKSet.from_dict(jwks))
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="invalid token") from exc
+    return decode_claims(token, key.key, issuer)
+
+
+def verify_token(token: str) -> dict:
+    """Return the verified claims of a Supabase session token.
+
+    401 `token expired` / `invalid token` for a bad token, 503 `auth unavailable`
+    when the project URL is unset or its JWKS can't be fetched."""
+    issuer = f"{_supabase_url()}/auth/v1"
+    try:
+        if _test_jwks is not None:
+            key = _key_from_set(token, _test_jwks)
+        else:
+            key = _client(jwks_url()).get_signing_key_from_jwt(token)
+    except jwt.PyJWKClientConnectionError as exc:
+        raise _unavailable() from exc
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="invalid token") from exc
+    return decode_claims(token, key.key, issuer)
 
 
 def _role_from_claims(claims: dict) -> str:
@@ -84,7 +144,7 @@ def require_user(
         def me(user: User = Depends(require_user)):
             return user
     """
-    claims = _decode(creds.credentials)
+    claims = verify_token(creds.credentials)
     sub = claims.get("sub")
     if not sub:
         raise HTTPException(status_code=401, detail="token missing subject")

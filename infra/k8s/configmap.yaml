@@ -13,6 +13,8 @@ data:
   SHOPIFY_STORES: ""
   # Default Apify actor for the Google-Shopping source.
   APIFY_ACTOR: "automation-lab~google-shopping-scraper"
+  # Supabase project URL: auth.py verifies sign-in tokens against its public JWKS.
+  SUPABASE_URL: "https://YOUR-PROJECT-REF.supabase.co"
   # Uvicorn/app tuning.
   PORT: "8000"
   LOG_LEVEL: "info"

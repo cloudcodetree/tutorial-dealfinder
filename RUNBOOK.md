@@ -23,7 +23,7 @@ SLOs off them.
 | IaC              | Docker/Terraform + K8s manifests    | `infra/main.tf`, `infra/k8s/`           |
 
 Container listens on **:8000**. Config + secrets arrive as env (`DATABASE_URL`,
-`SUPABASE_JWT_SECRET`, `RAPIDAPI_KEY`, `EBAY_APP_ID`/`EBAY_CERT_ID`,
+`SUPABASE_URL` (its JWKS verifies sign-in tokens), `RAPIDAPI_KEY`, `EBAY_APP_ID`/`EBAY_CERT_ID`,
 `BESTBUY_API_KEY`, `APIFY_TOKEN`, `FIRECRAWL_API_KEY`, Stripe keys). Missing a
 source key is *not* an outage — that source simply reports `available() == false`
 and sits out (see `GET /sources`).

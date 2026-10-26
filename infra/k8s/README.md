@@ -61,8 +61,7 @@ your registry first, and pin it by tag or digest.
   - **External Secrets Operator** syncing from AWS Secrets Manager / GCP Secret
     Manager / Vault, or
   - **Sealed Secrets** / **SOPS** for encrypted-at-rest manifests you *can* commit.
-- The Secret carries: `DATABASE_URL`, `SUPABASE_JWT_SECRET` (verifies Supabase
-  session JWTs — see `dealfinder/auth.py`), the Stripe keys
+- The Secret carries: `DATABASE_URL`, the Stripe keys
   (`STRIPE_SECRET_KEY`, `STRIPE_PRICE_PRO`, `STRIPE_WEBHOOK_SECRET` — see
   `dealfinder/billing.py`), and the optional live-source API keys.
 
