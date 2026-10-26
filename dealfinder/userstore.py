@@ -14,6 +14,7 @@ from __future__ import annotations
 from . import db
 
 WATCH_LIMIT = 200
+SAVED_SEARCH_LIMIT = 50
 
 _WATCH_COLS = """offer_id, title, url, image_url, source, target_price, last_price,
     last_checked_at, created_at,
@@ -84,4 +85,33 @@ def list_watch(user_id: str, url: str | None = None) -> list[dict]:
 def remove_watch(user_id: str, offer_id: str, url: str | None = None) -> int:
     with db.scoped(user_id=user_id, url=url) as cur:
         cur.execute("DELETE FROM dealfinder.watchlist WHERE offer_id = %s", (offer_id,))
+        return cur.rowcount
+
+
+def add_saved_search(user_id: str, query: str, max_price: float | None,
+                     url: str | None = None) -> dict:
+    """Save a search for the user. Raises LimitExceeded at SAVED_SEARCH_LIMIT."""
+    with db.scoped(user_id=user_id, url=url) as cur:
+        _lock_user(cur, user_id)
+        n = cur.execute("SELECT count(*) AS n FROM dealfinder.saved_searches").fetchone()["n"]
+        if n >= SAVED_SEARCH_LIMIT:
+            raise LimitExceeded()
+        return cur.execute(
+            """INSERT INTO dealfinder.saved_searches (user_id, query, max_price) VALUES (%s, %s, %s)
+               RETURNING id, query, max_price, created_at""",
+            (user_id, query, max_price),
+        ).fetchone()
+
+
+def list_saved_searches(user_id: str, url: str | None = None) -> list[dict]:
+    """The user's saved searches, newest first."""
+    with db.scoped(user_id=user_id, url=url) as cur:
+        return cur.execute(
+            "SELECT id, query, max_price, created_at FROM dealfinder.saved_searches ORDER BY created_at DESC"
+        ).fetchall()
+
+
+def remove_saved_search(user_id: str, search_id: str, url: str | None = None) -> int:
+    with db.scoped(user_id=user_id, url=url) as cur:
+        cur.execute("DELETE FROM dealfinder.saved_searches WHERE id = %s::uuid", (search_id,))
         return cur.rowcount

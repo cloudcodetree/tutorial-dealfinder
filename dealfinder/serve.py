@@ -10,12 +10,14 @@ import json
 import logging
 import os
 import statistics
+import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from . import db, migrate, pgstore
 from .aggregate import aggregate
@@ -314,6 +316,48 @@ def watchlist_remove(offer_id: str, who: Principal = Depends(require_account)):
     if not userstore.remove_watch(who.user_id, offer_id):
         raise HTTPException(status_code=404, detail="not on your watchlist")
     return {"removed": offer_id}
+
+
+class SavedSearchIn(BaseModel):
+    """A search to re-run for the user: 1-200 characters, an optional positive price cap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    max_price: float | None = Field(default=None, gt=0)
+
+
+@app.post("/saved-searches", status_code=201)
+def saved_search_add(body: SavedSearchIn, who: Principal = Depends(require_account)):
+    _require_db()
+    from . import userstore
+    try:
+        return userstore.add_saved_search(who.user_id, body.query, body.max_price)
+    except userstore.LimitExceeded as exc:
+        raise HTTPException(status_code=409,
+                            detail=f"saved-search limit reached ({userstore.SAVED_SEARCH_LIMIT})") from exc
+
+
+@app.get("/saved-searches")
+def saved_search_list(who: Principal = Depends(require_account)):
+    _require_db()
+    from . import userstore
+    items = userstore.list_saved_searches(who.user_id)
+    return {"count": len(items), "items": items}
+
+
+@app.delete("/saved-searches/{search_id}")
+def saved_search_remove(search_id: str, who: Principal = Depends(require_account)):
+    """Delete one of the user's saved searches. A malformed id is simply not found."""
+    try:
+        uuid.UUID(search_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="saved search not found") from exc
+    _require_db()
+    from . import userstore
+    if not userstore.remove_saved_search(who.user_id, search_id):
+        raise HTTPException(status_code=404, detail="saved search not found")
+    return {"removed": search_id}
 
 
 def _sse(event: str | None, data: dict) -> str:

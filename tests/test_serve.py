@@ -417,3 +417,20 @@ def test_ranked_remembers_shown_offers(monkeypatch, stub_sources, with_db):
 def test_remembering_offers_never_breaks_ranked(monkeypatch, stub_sources, with_db):
     monkeypatch.setattr(pgstore, "upsert", lambda *a, **k: raise_(RuntimeError("db down")))
     assert client.get("/ranked", params={"q": "headphones"}).status_code == 200
+
+
+@pytest.mark.parametrize("body", [{"query": ""}, {"query": "x" * 201}, {"query": "ok", "max_price": -1},
+                                  {"query": "ok", "extra": 1}])
+def test_saved_search_validation(mint, body):
+    assert client.post("/saved-searches", json=body, headers=bearer(mint("u-1"))).status_code == 422
+
+
+def test_saved_search_cap_is_409(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_saved_search", lambda *a, **k: raise_(userstore.LimitExceeded()))
+    r = client.post("/saved-searches", json={"query": "ok"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (409, "saved-search limit reached (50)")
+
+
+def test_delete_malformed_id_is_404(mint):
+    r = client.delete("/saved-searches/not-a-uuid", headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "saved search not found")

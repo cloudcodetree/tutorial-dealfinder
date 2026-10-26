@@ -47,3 +47,24 @@ def test_watchlist_is_private_per_user(db, offers):
 def test_hit_flag(db, offers):
     userstore.add_watch("user-carol", "public", "off-2", target_price=50.0, url=db)
     assert userstore.list_watch("user-carol", url=db)[0]["hit"] is True
+
+
+@pytest.fixture
+def clean_saved(db):
+    yield db
+    with psycopg.connect(db) as c:
+        c.execute("delete from dealfinder.saved_searches where user_id in ('user-alice', 'user-bob', 'user-dave')")
+
+
+def test_saved_searches_private_per_user(db, clean_saved):
+    a = userstore.add_saved_search("user-alice", "noise cancelling headphones", 150.0, url=db)
+    userstore.add_saved_search("user-bob", "mechanical keyboard", None, url=db)
+    assert [s["query"] for s in userstore.list_saved_searches("user-alice", url=db)] == ["noise cancelling headphones"]
+    assert userstore.remove_saved_search("user-bob", str(a["id"]), url=db) == 0
+
+
+def test_saved_search_cap(db, clean_saved):
+    for i in range(50):
+        userstore.add_saved_search("user-dave", f"q{i}", None, url=db)
+    with pytest.raises(userstore.LimitExceeded):
+        userstore.add_saved_search("user-dave", "one too many", None, url=db)
