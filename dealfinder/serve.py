@@ -91,6 +91,17 @@ def healthz():
     return {"status": "ok"}
 
 
+@app.get("/config.json")
+def public_config():
+    """Public browser settings, and nothing else: the Supabase project URL, its
+    publishable key (public by design) and the sign-in providers. Null when unset."""
+    return {
+        "supabaseUrl": os.getenv("SUPABASE_URL") or None,
+        "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY") or None,
+        "providers": ["google", "github"],
+    }
+
+
 @app.get("/readyz")
 def readyz():
     """Readiness: the database answers and its schema is current."""

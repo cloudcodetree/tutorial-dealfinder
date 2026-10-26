@@ -434,3 +434,19 @@ def test_saved_search_cap_is_409(mint, monkeypatch, with_db):
 def test_delete_malformed_id_is_404(mint):
     r = client.delete("/saved-searches/not-a-uuid", headers=bearer(mint("u-1")))
     assert (r.status_code, r.json()["detail"]) == (404, "saved search not found")
+
+
+def test_config_json_exposes_only_public_settings(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://tgcysgioncdmtzcfknix.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://secret-user:secret-pass@db/x")
+    r = client.get("/config.json")
+    assert set(r.json()) == {"supabaseUrl", "supabasePublishableKey", "providers"}
+    assert "secret-pass" not in r.text
+
+
+def test_lab_has_no_dev_identity():
+    from pathlib import Path
+    html = (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+    assert "X-User-Id" not in html and "prompt(" not in html
+    assert "@supabase/supabase-js@2.45.4" in html
