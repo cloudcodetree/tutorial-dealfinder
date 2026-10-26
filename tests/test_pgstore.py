@@ -1,25 +1,21 @@
 """pgvector store integration test — runs when a DB is reachable, skips otherwise
 (keeps the suite offline-green in CI; real when DATABASE_URL points at pgvector)."""
-import os
-
+import psycopg
 import pytest
 
 from dealfinder import pgstore
 
 
-def _db():
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        pytest.skip("DATABASE_URL not set")
-    try:
-        pgstore.migrate(url)
-    except Exception as e:  # DB not reachable in this environment
-        pytest.skip(f"db unavailable: {e}")
-    return url
+@pytest.fixture
+def clean_offers(db):
+    """Delete every offer these tests create, so reruns stay deterministic."""
+    yield db
+    with psycopg.connect(db) as c:
+        c.execute("delete from dealfinder.offers where id like 'test-%' or id like 'iso-%' or id like 'emb-%'")
 
 
-def test_upsert_and_semantic_search_ranks_by_meaning():
-    url = _db()
+def test_upsert_and_semantic_search_ranks_by_meaning(clean_offers):
+    url = clean_offers
     prods = [
         {"id": "test-tent", "title": "Tent", "brand": "B", "source": "S", "price": 100, "url": "", "image_url": None},
         {"id": "test-buds", "title": "Headphones", "brand": "B", "source": "S", "price": 50, "url": "", "image_url": None},
@@ -27,24 +23,24 @@ def test_upsert_and_semantic_search_ranks_by_meaning():
     # distinct unit vectors (no model needed → deterministic)
     embs = [[1.0, 0.0] + [0.0] * (pgstore.EMBED_DIM - 2),
             [0.0, 1.0] + [0.0] * (pgstore.EMBED_DIM - 2)]
-    pgstore.upsert(prods, embs, query="test", url=url)
+    pgstore.upsert(prods, embs, url=url)
 
     hits = pgstore.semantic_search([1.0, 0.0] + [0.0] * (pgstore.EMBED_DIM - 2), k=1, url=url)
     assert hits[0]["id"] == "test-tent"          # nearest to the tent vector
     assert hits[0]["similarity"] > 0.9
 
 
-def test_rls_isolates_tenants():
+def test_rls_isolates_tenants(clean_offers):
     # The ENFORCEMENT half of multi-tenancy: Row-Level Security guarantees a tenant
     # only ever sees its own rows — even for the SAME product id (composite key
     # keeps them distinct), and even though the app connects as a superuser login
     # role (pgstore SET ROLEs to a non-superuser app role so the policy applies).
-    url = _db()
+    url = clean_offers
     vec = [1.0, 0.0] + [0.0] * (pgstore.EMBED_DIM - 2)
     a = [{"id": "iso-x", "title": "Alpha Widget", "brand": "A", "source": "S", "price": 10, "url": "", "image_url": None}]
     b = [{"id": "iso-x", "title": "Beta Gadget", "brand": "B", "source": "S", "price": 20, "url": "", "image_url": None}]
-    pgstore.upsert(a, [vec], query="iso", tenant="tenant-a", url=url)
-    pgstore.upsert(b, [vec], query="iso", tenant="tenant-b", url=url)
+    pgstore.upsert(a, [vec], tenant="tenant-a", url=url)
+    pgstore.upsert(b, [vec], tenant="tenant-b", url=url)
 
     titles_a = {r["title"] for r in pgstore.semantic_search(vec, k=10, tenant="tenant-a", url=url)}
     titles_b = {r["title"] for r in pgstore.semantic_search(vec, k=10, tenant="tenant-b", url=url)}
@@ -54,3 +50,18 @@ def test_rls_isolates_tenants():
     # Same id under two tenants coexist (composite PK), each private to its tenant.
     assert pgstore.count(tenant="tenant-a", url=url) >= 1
     assert pgstore.count(tenant="tenant-b", url=url) >= 1
+
+
+def test_rows_without_embeddings_are_skipped_by_semantic_search(clean_offers):
+    db = clean_offers
+    vec = [0.0, 0.0, 1.0] + [0.0] * (pgstore.EMBED_DIM - 3)
+    pgstore.upsert([{"id": "emb-yes", "title": "Has vector", "source": "S", "price": 10}], [vec], url=db)
+    pgstore.upsert([{"id": "emb-no", "title": "No vector", "source": "S", "price": 10}], None, url=db)
+    assert "No vector" not in {r["title"] for r in pgstore.semantic_search(vec, k=50, url=db)}
+
+
+def test_offers_store_no_query_text(db):
+    with psycopg.connect(db) as c:
+        cols = {r[0] for r in c.execute("""select column_name from information_schema.columns
+                where table_schema='dealfinder' and table_name='offers'""")}
+    assert "query" not in cols

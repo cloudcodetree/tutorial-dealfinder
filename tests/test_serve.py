@@ -3,6 +3,7 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
+from dealfinder import db as db_mod
 from dealfinder.cache import SemanticCache
 from dealfinder.serve import _catalog, app
 
@@ -13,9 +14,20 @@ def _id(needle):
     return next(p.id for p in _catalog if needle.lower() in p.title.lower())
 
 
-def test_healthz():
-    r = client.get("/healthz")
-    assert r.status_code == 200 and r.json()["status"] == "ok"
+def test_healthz_is_liveness_only():
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_readyz_without_db(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert client.get("/readyz").json() == {"db": "disabled"}
+
+
+def test_readyz_db_down(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://nobody@127.0.0.1:9/none")
+    monkeypatch.setattr(db_mod, "ping", lambda *a, **k: False)
+    r = client.get("/readyz")
+    assert (r.status_code, r.json()) == (503, {"db": "down"})
 
 
 def test_deal_endpoint():

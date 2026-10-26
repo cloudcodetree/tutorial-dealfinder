@@ -14,10 +14,10 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import migrate, pgstore
+from . import db, migrate, pgstore
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -85,7 +85,20 @@ def _warm_embed_model() -> None:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "products": len(_catalog)}
+    """Liveness: the process answers. Never touches the database."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz():
+    """Readiness: the database answers and its schema is current."""
+    if not os.getenv("DATABASE_URL"):
+        return {"db": "disabled"}
+    if not db.ping():
+        return JSONResponse({"db": "down"}, status_code=503)
+    if not migrate.schema_ready():
+        return JSONResponse({"db": "ok", "schema": "pending"}, status_code=503)
+    return {"db": "ok", "schema": "current"}
 
 
 @app.get("/search")
@@ -96,7 +109,7 @@ def search(q: str, who: Principal = Depends(current_principal)):
     if _DB and result["results"]:
         try:
             texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
-            pgstore.upsert(result["results"], _embed_texts(texts), query=q, tenant=who.tenant_id)
+            pgstore.upsert(result["results"], _embed_texts(texts), tenant=who.tenant_id)
             result["persisted"] = pgstore.count(tenant=who.tenant_id)
             result["tenant"] = who.tenant_id
         except Exception:

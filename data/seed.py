@@ -15,10 +15,6 @@ from dealfinder.embed import load_title_embeddings
 from dealfinder.pgstore import count, migrate, upsert
 from dealfinder.snapshot import load_products
 
-# The snapshot was collected under this anchor query; every row shares the label.
-ANCHOR_QUERY = "noise cancelling headphones"
-
-
 def seed() -> None:
     migrate()
 
@@ -36,7 +32,7 @@ def seed() -> None:
         })
         embs.append(np.asarray(vectors[pos[p.id]], dtype=np.float32))
 
-    n = upsert(rows, embs, query=ANCHOR_QUERY)
+    n = upsert(rows, embs)
     print(f"Seeded {n} products; total in DB: {count()}")
 
 
