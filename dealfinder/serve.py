@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import db, migrate, pgstore
 from .aggregate import aggregate
@@ -234,6 +234,7 @@ def ranked(q: str, k: int = 12, who: Principal = Depends(current_principal)):
         return s
     scored.sort(key=_value, reverse=True)
     scored = scored[:k]
+    _remember_offers(scored, who.tenant_id)   # so a shown deal can be watched
     return {
         "query": q,
         "count": len(scored),
@@ -257,13 +258,12 @@ def redesign():
 
 # ── Consumer accounts: the per-user watchlist (P1). Private per user via RLS. ──
 class WatchIn(BaseModel):
-    id: str
-    title: str
-    url: str | None = None
-    image_url: str | None = None
-    source: str | None = None
-    target_price: float | None = None
-    last_price: float | None = None
+    """What a client may send: which offer, and an optional target. Never a price."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    offer_id: str
+    target_price: float | None = Field(default=None, gt=0)
 
 
 def _require_db() -> None:
@@ -271,13 +271,30 @@ def _require_db() -> None:
         raise HTTPException(status_code=503, detail="accounts need a database (set DATABASE_URL)")
 
 
-@app.post("/watchlist")
+def _remember_offers(results: list[dict], tenant: str) -> None:
+    """Store shown offers in the tenant's catalog so a shopper can watch them.
+
+    Best-effort: a database problem never breaks search."""
+    if not _DB or not results:
+        return
+    try:
+        pgstore.upsert(results, None, tenant=tenant)
+    except Exception:
+        logging.getLogger("dealfinder").warning("could not remember %d offers", len(results), exc_info=True)
+
+
+@app.post("/watchlist", status_code=201)
 def watchlist_add(item: WatchIn, who: Principal = Depends(require_account)):
-    """Add (or update) an item on the signed-in user's watchlist. Store the price
-    seen now + an optional target; a price-drop is when last_price <= target_price."""
+    """Watch an offer the signed-in user was shown. The price comes from the
+    server's catalog; a price-drop is when last_price <= target_price."""
     _require_db()
     from . import userstore
-    return userstore.add_watch(who.user_id, item.model_dump())
+    try:
+        return userstore.add_watch(who.user_id, who.tenant_id, item.offer_id, item.target_price)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="offer not found — search for it first") from exc
+    except userstore.LimitExceeded as exc:
+        raise HTTPException(status_code=409, detail=f"watchlist limit reached ({userstore.WATCH_LIMIT})") from exc
 
 
 @app.get("/watchlist")
@@ -287,16 +304,16 @@ def watchlist_list(who: Principal = Depends(require_account)):
     _require_db()
     from . import userstore
     items = userstore.list_watch(who.user_id)
-    return {"user": who.user_id, "count": len(items), "items": items}
+    return {"count": len(items), "items": items}
 
 
-@app.delete("/watchlist/{item_id}")
-def watchlist_remove(item_id: str, who: Principal = Depends(require_account)):
+@app.delete("/watchlist/{offer_id}")
+def watchlist_remove(offer_id: str, who: Principal = Depends(require_account)):
     _require_db()
     from . import userstore
-    if not userstore.remove_watch(who.user_id, item_id):
+    if not userstore.remove_watch(who.user_id, offer_id):
         raise HTTPException(status_code=404, detail="not on your watchlist")
-    return {"removed": item_id}
+    return {"removed": offer_id}
 
 
 def _sse(event: str | None, data: dict) -> str:

@@ -4,10 +4,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dealfinder import db as db_mod
+from dealfinder import pgstore, serve, userstore
 from dealfinder.cache import SemanticCache
 from dealfinder.serve import _catalog, app
+from tests.conftest import bearer
 
 client = TestClient(app)
+
+
+def raise_(exc):
+    raise exc
 
 
 def _id(needle):
@@ -367,3 +373,47 @@ def test_compliance_endpoint_reports_ratelimit_gdpr_and_abuse():
     assert b["abuse"]["velocity_burst"]["flagged"] is True
     assert any("velocity" in x for x in b["abuse"]["velocity_burst"]["reasons"])
     assert b["abuse"]["normal_use"]["flagged"] is False
+
+
+@pytest.fixture
+def with_db(monkeypatch):
+    monkeypatch.setattr(serve, "_DB", True)
+
+
+def test_client_price_is_rejected(mint, with_db):
+    r = client.post("/watchlist", json={"offer_id": "off-1", "target_price": 40, "last_price": 1},
+                    headers=bearer(mint("u-1")))
+    assert r.status_code == 422
+    assert [e["loc"][-1] for e in r.json()["detail"] if e["type"] == "extra_forbidden"] == ["last_price"]
+
+
+def test_watch_unknown_offer_is_404(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_watch", lambda *a, **k: raise_(LookupError()))
+    r = client.post("/watchlist", json={"offer_id": "nope"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "offer not found — search for it first")
+
+
+def test_watch_cap_is_409(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_watch", lambda *a, **k: raise_(userstore.LimitExceeded()))
+    r = client.post("/watchlist", json={"offer_id": "off-1"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (409, "watchlist limit reached (200)")
+
+
+def test_target_price_must_be_positive(mint, with_db):
+    r = client.post("/watchlist", json={"offer_id": "off-1", "target_price": 0}, headers=bearer(mint("u-1")))
+    assert r.status_code == 422
+    assert [e["loc"] for e in r.json()["detail"]] == [["body", "target_price"]]
+
+
+def test_ranked_remembers_shown_offers(monkeypatch, stub_sources, with_db):
+    calls = []
+    monkeypatch.setattr(pgstore, "upsert", lambda rows, embs, tenant="public", url=None: calls.append((rows, embs, tenant)))
+    body = client.get("/ranked", params={"q": "headphones", "k": 2}).json()
+    assert len(calls) == 1
+    rows, embs, tenant = calls[0]
+    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and embs is None and tenant == "public"
+
+
+def test_remembering_offers_never_breaks_ranked(monkeypatch, stub_sources, with_db):
+    monkeypatch.setattr(pgstore, "upsert", lambda *a, **k: raise_(RuntimeError("db down")))
+    assert client.get("/ranked", params={"q": "headphones"}).status_code == 200

@@ -1,46 +1,49 @@
-"""Per-user watchlist isolation (RLS) — runs when a DB is reachable, skips otherwise
-(keeps the suite offline-green in CI; real when DATABASE_URL points at pgvector)."""
-import os
-
+"""Per-user watchlist: server-side prices and RLS isolation (DB tests; skip without a database)."""
+import psycopg
 import pytest
 
-from dealfinder import userstore
+from dealfinder import pgstore, userstore
+
+_IDS = ("off-1", "off-2", "acme-1")
 
 
-def _db():
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        pytest.skip("DATABASE_URL not set")
-    try:
-        userstore.migrate(url)
-    except Exception as e:
-        pytest.skip(f"db unavailable: {e}")
-    return url
+@pytest.fixture
+def offers(db):
+    """Three catalog offers (two public, one in tenant acme); removes everything the tests made."""
+    pgstore.upsert([{"id": "off-1", "title": "Anker Soundcore Q20i", "source": "S", "price": 44.99},
+                    {"id": "off-2", "title": "Bose QuietComfort 45", "source": "S", "price": 46.00}],
+                   None, tenant="public", url=db)
+    pgstore.upsert([{"id": "acme-1", "title": "Acme Only", "source": "S", "price": 10.0}],
+                   None, tenant="acme", url=db)
+    yield db
+    with psycopg.connect(db) as c:
+        c.execute("delete from dealfinder.watchlist where offer_id = any(%s)", (list(_IDS) + ["nope"],))
+        c.execute("delete from dealfinder.offers where id = any(%s)", (list(_IDS),))
 
 
-def test_watchlist_is_private_per_user():
-    url = _db()
-    # Same item id under two users — the composite key + RLS keep them separate.
-    userstore.add_watch("user-alice", {"id": "w-iso", "title": "Alice Item",
-                                       "last_price": 50.0, "target_price": 40.0}, url=url)
-    userstore.add_watch("user-bob", {"id": "w-iso", "title": "Bob Item",
-                                     "last_price": 9.0, "target_price": 40.0}, url=url)
-    try:
-        alice = userstore.list_watch("user-alice", url=url)
-        bob = userstore.list_watch("user-bob", url=url)
-        a_titles = {r["title"] for r in alice}
-        b_titles = {r["title"] for r in bob}
-        assert "Alice Item" in a_titles and "Bob Item" not in a_titles
-        assert "Bob Item" in b_titles and "Alice Item" not in b_titles
+def test_watch_uses_server_price(db, offers):
+    row = userstore.add_watch("user-alice", "public", "off-1", target_price=40.0, url=db)
+    assert row["last_price"] == 44.99 and row["title"] == "Anker Soundcore Q20i"
 
-        # price-drop `hit`: bob's $9 <= $40 target is a hit; alice's $50 > $40 isn't.
-        assert next(r for r in bob if r["title"] == "Bob Item")["hit"] is True
-        assert next(r for r in alice if r["title"] == "Alice Item")["hit"] is False
 
-        # a user can't delete another user's row (RLS scopes the DELETE).
-        assert userstore.remove_watch("user-bob", "w-iso", url=url) == 1
-        assert "Bob Item" not in {r["title"] for r in userstore.list_watch("user-bob", url=url)}
-        assert "Alice Item" in {r["title"] for r in userstore.list_watch("user-alice", url=url)}
-    finally:
-        userstore.remove_watch("user-alice", "w-iso", url=url)
-        userstore.remove_watch("user-bob", "w-iso", url=url)
+def test_watch_unknown_offer(db, offers):
+    with pytest.raises(LookupError):
+        userstore.add_watch("user-alice", "public", "nope", None, url=db)
+
+
+def test_watch_offer_from_other_tenant_is_not_found(db, offers):
+    with pytest.raises(LookupError):
+        userstore.add_watch("user-alice", "public", "acme-1", None, url=db)
+
+
+def test_watchlist_is_private_per_user(db, offers):
+    userstore.add_watch("user-alice", "public", "off-1", 40.0, url=db)
+    userstore.add_watch("user-bob", "public", "off-2", 50.0, url=db)
+    assert {r["offer_id"] for r in userstore.list_watch("user-alice", url=db)} == {"off-1"}
+    assert {r["offer_id"] for r in userstore.list_watch("user-bob", url=db)} == {"off-2"}
+    assert userstore.remove_watch("user-bob", "off-1", url=db) == 0
+
+
+def test_hit_flag(db, offers):
+    userstore.add_watch("user-carol", "public", "off-2", target_price=50.0, url=db)
+    assert userstore.list_watch("user-carol", url=db)[0]["hit"] is True

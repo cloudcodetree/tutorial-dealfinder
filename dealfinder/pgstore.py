@@ -18,11 +18,6 @@ managed Postgres (Supabase, through its pooler).
 """
 from __future__ import annotations
 
-import os
-
-import psycopg
-from psycopg.rows import dict_row
-
 from . import db
 
 EMBED_DIM = 384  # bge-small-en-v1.5
@@ -31,14 +26,6 @@ DEFAULT_TENANT = "public"
 
 def _vec(emb) -> str | None:
     return None if emb is None else "[" + ",".join(f"{float(x):.6f}" for x in emb) + "]"
-
-
-def connect(url: str | None = None):
-    """Legacy direct connection, kept only for userstore until Plan 1 Task 5."""
-    u = url or os.getenv("DATABASE_URL")
-    if not u:
-        raise RuntimeError("DATABASE_URL is not set")
-    return psycopg.connect(u, row_factory=dict_row, connect_timeout=8)
 
 
 def migrate(url: str | None = None) -> list[str]:
