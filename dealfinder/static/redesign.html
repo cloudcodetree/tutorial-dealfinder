@@ -339,12 +339,16 @@ function onAuthChange(){
   loaded.watchlist = false;
   if(state.mode === 'watchlist') loadWatchlist();
 }
+function openSignin(){
+  if(!sb) return;
+  document.getElementById('signin').hidden = false;
+  document.getElementById('signinAddr').focus();
+}
 async function toggleAcct(){
   if(!sb) return;
   if(session){ await sb.auth.signOut(); return; }
   const panel = document.getElementById('signin');
-  panel.hidden = !panel.hidden;
-  if(!panel.hidden) document.getElementById('signinAddr').focus();
+  if(panel.hidden) openSignin(); else panel.hidden = true;
 }
 const returnTo = () => location.origin + location.pathname;
 async function initAuth(){
@@ -524,7 +528,7 @@ function cardHTML(r,i){
 }
 async function addWatch(r, btn){
   if(!r) return;
-  if(!signedIn()){ toggleAcct(); return; }
+  if(!signedIn()){ openSignin(); return; }
   try{
     // Only which offer and a target: the server fills in the title and price from its catalog.
     const body = {offer_id:r.id, target_price:r.price};
