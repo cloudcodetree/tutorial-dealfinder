@@ -9,16 +9,18 @@ Two halves, and the second is the one people under-build:
    tenants. That's defense in depth, and it's the standard SaaS default (it's how
    Supabase itself works).
 
-Resolution order (first hit wins), so the same code serves production and dev:
-  1. the verified JWT's tenant claim (`app_metadata.tenant` / `org_id`) — production;
-  2. an `X-Tenant-Id` header — local/dev/testing without minting real tokens;
-  3. the default tenant ``"public"`` — anonymous/free public search.
+Resolution order (first hit wins):
+  1. the verified JWT: its tenant claim (`app_metadata.tenant` / `org_id`) and `sub`;
+  2. the default tenant ``"public"``, anonymous — public search.
+
+No request header can set a user or a tenant. Identity comes only from a token
+the JWKS verified (see `auth.py`).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import auth
@@ -54,32 +56,25 @@ def _tenant_from_claims(claims: dict) -> str | None:
 
 def current_principal(
     creds: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
-    x_tenant_id: str | None = Header(default=None),
-    x_user_id: str | None = Header(default=None),
 ) -> Principal:
     """FastAPI dependency: resolve the request's `Principal` (tenant + identity).
 
-    A valid token wins; otherwise fall back to dev headers, then the public tenant.
-    `X-User-Id` lets you exercise consumer account features locally without minting
-    a real JWT (same spirit as `X-Tenant-Id`). Drop it on any route that reads or
-    writes owned data:
+    No token: the public tenant, anonymous. A valid token: its tenant claim (or
+    public), its `sub` as the user, and its plan as the role. A bad token is 401
+    and an auth outage is 503, both from `auth.verify_token`. Drop it on any route
+    that reads or writes owned data:
 
         @app.get("/search")
         def search(q: str, who: Principal = Depends(current_principal)):
             ...
     """
-    if creds is not None:
-        claims = auth.verify_token(creds.credentials)  # JWKS-verified, or 401/503
-        tenant = _tenant_from_claims(claims) or x_tenant_id or DEFAULT_TENANT
-        return Principal(
-            tenant_id=tenant,
-            user_id=claims.get("sub"),
-            role=auth._role_from_claims(claims),
-        )
+    if creds is None:
+        return Principal(tenant_id=DEFAULT_TENANT)
+    claims = auth.verify_token(creds.credentials)
     return Principal(
-        tenant_id=x_tenant_id or DEFAULT_TENANT,
-        user_id=x_user_id,
-        role="user" if x_user_id else "anonymous",
+        tenant_id=_tenant_from_claims(claims) or DEFAULT_TENANT,
+        user_id=claims.get("sub"),
+        role=auth._role_from_claims(claims),
     )
 
 

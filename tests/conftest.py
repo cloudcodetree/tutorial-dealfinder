@@ -89,3 +89,24 @@ def mint(_es256_key, monkeypatch):
 
     yield _mint
     auth.set_jwks_for_testing(None)
+
+
+@pytest.fixture
+def stub_sources(monkeypatch):
+    """Keep /ranked off the network: canned offers and deterministic embeddings."""
+    from dealfinder import serve
+
+    fake = {
+        "query": "x", "sources_live": ["Stub"], "throttled": [], "median_price": 60.0, "count": 3,
+        "results": [
+            {"id": "h1", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
+             "price": 50.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 16.7},
+            {"id": "h2", "title": "Anker Soundcore Q20i Headphones", "brand": "Anker",
+             "price": 60.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 0.0},
+            {"id": "h3", "title": "Bose QuietComfort 45 Headphones", "brand": "Bose",
+             "price": 70.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": -16.7},
+        ],
+    }
+    monkeypatch.setattr(serve, "aggregate", lambda q: fake)
+    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
+    return fake

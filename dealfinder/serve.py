@@ -152,7 +152,7 @@ def _deal_reason(verdict, m, rf, fair, basis) -> str:
 
 
 @app.get("/ranked")
-def ranked(q: str, k: int = 12):
+def ranked(q: str, k: int = 12, who: Principal = Depends(current_principal)):
     """LIVE value-ranked deals for ANY query, with the two-signal verdict via a
     layered fair-price estimator (a graceful-degradation design — the point of a
     robust deal finder, not a headphones-only demo).
