@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import statistics
+import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -33,13 +37,31 @@ from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
 
+
+def _json_safe(value):
+    """Make a validation error echo serializable: NaN/Infinity become strings."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request, exc: RequestValidationError):
+    """FastAPI's default 422, except a rejected NaN or Infinity can't turn it into a 500."""
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
 # Persistence is optional: if DATABASE_URL points at a migrated pgvector, we
 # persist + enable semantic search; otherwise the app still does live search.
 # Serving never migrates: run `python -m dealfinder.migrate` first.
 def _db_ready() -> bool:
-    if not os.getenv("DATABASE_URL"):
+    url = os.getenv("DATABASE_URL")
+    if not url:
         return False
-    ready = migrate.schema_ready()
+    ready = migrate.schema_ready(url)
     if not ready:
         logging.getLogger("dealfinder").warning(
             "DATABASE_URL is set but the schema is not ready; run `python -m dealfinder.migrate`")
@@ -47,6 +69,20 @@ def _db_ready() -> bool:
 
 
 _DB = _db_ready()
+_DB_CHECKED_AT = time.monotonic()
+_DB_RECHECK_S = 30.0   # a database that comes up after boot is picked up within this
+
+
+def _maybe_recheck_db() -> None:
+    """Re-evaluate _DB when it is off, at most every _DB_RECHECK_S, so an instance
+    that booted while the database was down recovers without a restart."""
+    global _DB, _DB_CHECKED_AT
+    if _DB or not os.getenv("DATABASE_URL"):
+        return
+    if time.monotonic() - _DB_CHECKED_AT < _DB_RECHECK_S:
+        return
+    _DB_CHECKED_AT = time.monotonic()
+    _DB = _db_ready()
 
 
 def _embed_texts(texts):
@@ -102,16 +138,29 @@ def public_config():
     }
 
 
+_READY: tuple[float, int, dict] | None = None   # (checked_at, status, body)
+_READY_TTL_S = 30.0
+
+
 @app.get("/readyz")
 def readyz():
-    """Readiness: the database answers and its schema is current."""
+    """Readiness: the database answers and its schema is current.
+
+    Checked through the request pool and cached for _READY_TTL_S, so probing it
+    never opens extra connections to the shared project."""
+    global _READY, _DB
     if not os.getenv("DATABASE_URL"):
         return {"db": "disabled"}
-    if not db.ping():
-        return JSONResponse({"db": "down"}, status_code=503)
-    if not migrate.schema_ready():
-        return JSONResponse({"db": "ok", "schema": "pending"}, status_code=503)
-    return {"db": "ok", "schema": "current"}
+    if _READY is None or time.monotonic() - _READY[0] >= _READY_TTL_S:
+        if not db.ping():
+            status, body = 503, {"db": "down"}
+        elif not db.schema_current():
+            status, body = 503, {"db": "ok", "schema": "pending"}
+        else:
+            status, body = 200, {"db": "ok", "schema": "current"}
+            _DB = True
+        _READY = (time.monotonic(), status, body)
+    return JSONResponse(_READY[2], status_code=_READY[1])
 
 
 @app.get("/search")
@@ -178,7 +227,8 @@ def _deal_reason(verdict, m, rf, fair, basis) -> str:
 
 
 @app.get("/ranked")
-def ranked(q: str, k: int = 12, who: Principal = Depends(current_principal)):
+def ranked(q: str, background: BackgroundTasks, k: int = 12,
+           who: Principal = Depends(current_principal)):
     """LIVE value-ranked deals for ANY query, with the two-signal verdict via a
     layered fair-price estimator (a graceful-degradation design — the point of a
     robust deal finder, not a headphones-only demo).
@@ -247,7 +297,7 @@ def ranked(q: str, k: int = 12, who: Principal = Depends(current_principal)):
         return s
     scored.sort(key=_value, reverse=True)
     scored = scored[:k]
-    _remember_offers(scored, who.tenant_id)   # so a shown deal can be watched
+    background.add_task(_remember_offers, scored, who.tenant_id)   # after the response: a shown deal can be watched
     return {
         "query": q,
         "count": len(scored),
@@ -270,16 +320,24 @@ def redesign():
 
 
 # ── Consumer accounts: the per-user watchlist (P1). Private per user via RLS. ──
+# A shopper-entered price: positive, finite (no NaN or Infinity) and below a
+# million dollars. An offer id: 1-200 characters with no NUL byte (Postgres text
+# can't hold one).
+Money = Annotated[float, Field(gt=0, lt=1_000_000, allow_inf_nan=False)]
+OfferId = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^[^\x00]+$")]
+
+
 class WatchIn(BaseModel):
     """What a client may send: which offer, and an optional target. Never a price."""
 
     model_config = ConfigDict(extra="forbid")
 
-    offer_id: str
-    target_price: float | None = Field(default=None, gt=0)
+    offer_id: OfferId
+    target_price: Money | None = None
 
 
 def _require_db() -> None:
+    _maybe_recheck_db()
     if not _DB:
         raise HTTPException(status_code=503, detail="accounts need a database (set DATABASE_URL)")
 
@@ -322,6 +380,8 @@ def watchlist_list(who: Principal = Depends(require_account)):
 
 @app.delete("/watchlist/{offer_id}")
 def watchlist_remove(offer_id: str, who: Principal = Depends(require_account)):
+    if "\x00" in offer_id:
+        raise HTTPException(status_code=404, detail="not on your watchlist")
     _require_db()
     from . import userstore
     if not userstore.remove_watch(who.user_id, offer_id):
@@ -334,8 +394,9 @@ class SavedSearchIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-    max_price: float | None = Field(default=None, gt=0)
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200,
+                                            pattern=r"^[^\x00]+$")]
+    max_price: Money | None = None
 
 
 @app.post("/saved-searches", status_code=201)

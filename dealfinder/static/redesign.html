@@ -314,11 +314,18 @@ button{font:inherit;cursor:pointer;}
     </main>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<!-- The package's own UMD file (byte-identical to the npm tarball), pinned by SRI. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$" + Number(n).toFixed(2);
+// Offer links come from third-party sources. Only http(s) URLs become links, so a
+// javascript: URL can never run in a page that holds a sign-in token.
+function safeHref(u){
+  try{ const p = new URL(u, location.href); return /^https?:$/.test(p.protocol) ? esc(p.href) : '#'; }
+  catch(e){ return '#'; }
+}
 let state = { mode:"deals", q:"noise cancelling headphones" };
 let rankedThr = 0.70;   // suspicious-residual threshold; the backend sends the real value
 // Real sign-in: Supabase Auth in the browser. The backend verifies the access
@@ -520,7 +527,7 @@ function cardHTML(r,i){
     <div class="priceblock">
       <div class="price">${money(r.price)}</div>
       <div style="display:flex;gap:var(--space-3);align-items:center;">
-        ${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
+        ${r.url?`<a class="link-sm" href="${safeHref(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
         <button class="linkbtn watch-btn" data-idx="${i}">＋ watch</button>
       </div>
     </div>
@@ -606,7 +613,7 @@ function semCard(r){
     <div class="card-body"><div class="card-head"><span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span></div>
       <div class="title">${esc(r.title)}</div></div>
     <div class="signal"><span class="sig-note accent">${esc(sim)}</span></div>
-    <div class="priceblock"><div class="price">${r.price!=null?money(r.price):''}</div>${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}</div>
+    <div class="priceblock"><div class="price">${r.price!=null?money(r.price):''}</div>${r.url?`<a class="link-sm" href="${safeHref(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}</div>
   </div>`;
 }
 
@@ -707,7 +714,7 @@ function wlCard(it){
     <div class="priceblock">
       <div class="price">${it.last_price!=null?money(it.last_price):''}</div>
       <div style="display:flex;gap:var(--space-3);align-items:center;">
-        ${it.url?`<a class="link-sm" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">open →</a>`:''}
+        ${it.url?`<a class="link-sm" href="${safeHref(it.url)}" target="_blank" rel="noopener noreferrer">open →</a>`:''}
         <button class="linkbtn wl-remove" data-id="${esc(it.offer_id)}">remove</button>
       </div>
     </div>

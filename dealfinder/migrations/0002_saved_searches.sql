@@ -5,7 +5,8 @@ CREATE TABLE dealfinder.saved_searches (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    text NOT NULL,
     query      text NOT NULL CHECK (char_length(query) BETWEEN 1 AND 200),
-    max_price  double precision CHECK (max_price IS NULL OR max_price > 0),
+    -- NaN sorts above Infinity in Postgres, so `< 'Infinity'` also rejects NaN.
+    max_price  double precision CHECK (max_price IS NULL OR (max_price > 0 AND max_price < 'Infinity')),
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX saved_searches_user_idx ON dealfinder.saved_searches (user_id, created_at DESC);

@@ -26,3 +26,16 @@ def test_scoped_rolls_back_on_error(db):
 def test_scoped_sees_only_its_tenant(db):
     with db_mod.scoped(tenant_id="tenant-a", url=db) as cur:
         assert cur.execute("select current_setting('app.tenant_id', true) as t").fetchone()["t"] == "tenant-a"
+
+
+def test_scoped_gives_up_fast_when_the_database_is_unreachable():
+    import time
+    bad = "postgresql://nobody@127.0.0.1:9/none"
+    t0 = time.monotonic()
+    try:
+        with pytest.raises(Exception):
+            with db_mod.scoped(url=bad):
+                pass
+        assert time.monotonic() - t0 < 6
+    finally:
+        db_mod._pools.pop(bad).close()

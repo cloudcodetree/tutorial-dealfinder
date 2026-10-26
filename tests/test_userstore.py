@@ -68,3 +68,10 @@ def test_saved_search_cap(db, clean_saved):
         userstore.add_saved_search("user-dave", f"q{i}", None, url=db)
     with pytest.raises(userstore.LimitExceeded):
         userstore.add_saved_search("user-dave", "one too many", None, url=db)
+
+
+def test_database_rejects_non_finite_prices(db, offers, clean_saved):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        userstore.add_watch("user-alice", "public", "off-1", target_price=float("inf"), url=db)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        userstore.add_saved_search("user-alice", "ok", float("nan"), url=db)

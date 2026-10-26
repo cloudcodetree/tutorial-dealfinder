@@ -27,6 +27,10 @@ from psycopg_pool import ConnectionPool
 _pools: dict[str, ConnectionPool] = {}
 _lock = threading.Lock()
 
+# How long a request waits for a pooled connection before giving up. Short, so a
+# database outage costs a request seconds, not the pool's 30-second default.
+_CHECKOUT_TIMEOUT_S = float(os.getenv("DB_CHECKOUT_TIMEOUT_S", "3"))
+
 
 def _url(url: str | None) -> str:
     u = url or os.getenv("DATABASE_URL")
@@ -54,7 +58,7 @@ def scoped(*, user_id: str | None = None, tenant_id: str = "public",
     """One transaction as `dealfinder_app`, scoped to a tenant and (optionally) a user.
 
     Commits on a clean exit, rolls back on an exception."""
-    with get_pool(url).connection() as conn, conn.transaction(), conn.cursor() as cur:
+    with get_pool(url).connection(timeout=_CHECKOUT_TIMEOUT_S) as conn, conn.transaction(), conn.cursor() as cur:
         cur.execute("SET LOCAL ROLE dealfinder_app")
         cur.execute("SET LOCAL search_path = dealfinder, extensions, public")
         cur.execute("SELECT set_config('app.tenant_id', %s, true), set_config('app.user_id', %s, true)",
@@ -65,8 +69,23 @@ def scoped(*, user_id: str | None = None, tenant_id: str = "public",
 def ping(url: str | None = None) -> bool:
     """True when the database answers within a few seconds."""
     try:
-        with get_pool(url).connection(timeout=3) as conn:
+        with get_pool(url).connection(timeout=_CHECKOUT_TIMEOUT_S) as conn:
             conn.execute("SELECT 1")
         return True
+    except Exception:
+        return False
+
+
+def schema_current(url: str | None = None) -> bool:
+    """True when every migration file is recorded as applied, checked through the pool.
+
+    The web process uses this instead of `migrate.schema_ready`, which opens its
+    own connection and may use the migration URL."""
+    from . import migrate
+
+    try:
+        with get_pool(url).connection(timeout=_CHECKOUT_TIMEOUT_S) as conn:
+            done = {r["filename"] for r in conn.execute("SELECT filename FROM dealfinder.schema_migrations")}
+        return set(migrate._files()) <= done
     except Exception:
         return False

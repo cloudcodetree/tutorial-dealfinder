@@ -49,7 +49,7 @@ CREATE TABLE dealfinder.watchlist (
     url             text,
     image_url       text,
     source          text,
-    target_price    double precision,
+    target_price    double precision CHECK (target_price IS NULL OR (target_price > 0 AND target_price < 'Infinity')),
     last_price      double precision NOT NULL,
     last_checked_at timestamptz NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now(),

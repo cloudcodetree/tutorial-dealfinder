@@ -24,6 +24,11 @@ def test_healthz_is_liveness_only():
     assert client.get("/healthz").json() == {"status": "ok"}
 
 
+@pytest.fixture(autouse=True)
+def _fresh_readiness(monkeypatch):
+    monkeypatch.setattr(serve, "_READY", None)
+
+
 def test_readyz_without_db(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert client.get("/readyz").json() == {"db": "disabled"}
@@ -450,3 +455,83 @@ def test_lab_has_no_dev_identity():
     html = (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
     assert "X-User-Id" not in html and "prompt(" not in html
     assert "@supabase/supabase-js@2.45.4" in html
+
+
+def test_readyz_is_cached_and_uses_the_pool(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql://nobody@127.0.0.1:9/none")
+    calls = []
+    monkeypatch.setattr(db_mod, "ping", lambda *a, **k: calls.append("ping") or True)
+    monkeypatch.setattr(db_mod, "schema_current", lambda *a, **k: calls.append("schema") or True)
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: pytest.fail("readyz must not open its own connection"))
+    assert client.get("/readyz").json() == {"db": "ok", "schema": "current"}
+    assert client.get("/readyz").json() == {"db": "ok", "schema": "current"}
+    assert calls == ["ping", "schema"]
+
+
+def test_account_routes_recheck_a_database_that_came_up_late(monkeypatch):
+    monkeypatch.setattr(serve, "_DB", False)
+    monkeypatch.setattr(serve, "_DB_CHECKED_AT", float("-inf"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: True)
+    serve._require_db()
+    assert serve._DB is True
+
+
+def test_database_recheck_is_throttled(monkeypatch):
+    import time
+    monkeypatch.setattr(serve, "_DB", False)
+    monkeypatch.setattr(serve, "_DB_CHECKED_AT", time.monotonic())
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: pytest.fail("rechecked too soon"))
+    with pytest.raises(Exception) as exc:
+        serve._require_db()
+    assert exc.value.status_code == 503
+
+
+_JSON = {"Content-Type": "application/json"}
+
+
+@pytest.mark.parametrize("raw", ['{"offer_id": "off-1", "target_price": Infinity}',
+                                 '{"offer_id": "off-1", "target_price": NaN}',
+                                 '{"offer_id": "off-1", "target_price": 1e400}',
+                                 '{"offer_id": "off-1", "target_price": 2000000}',
+                                 '{"offer_id": "a\\u0000b"}'])
+def test_watch_rejects_non_finite_huge_or_nul_input(mint, with_db, raw):
+    r = client.post("/watchlist", content=raw, headers={**_JSON, **bearer(mint("u-1"))})
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("raw", ['{"query": "ok", "max_price": Infinity}',
+                                 '{"query": "ok", "max_price": NaN}',
+                                 '{"query": "ok", "max_price": 2000000}',
+                                 '{"query": "a\\u0000b"}'])
+def test_saved_search_rejects_non_finite_huge_or_nul_input(mint, with_db, raw):
+    r = client.post("/saved-searches", content=raw, headers={**_JSON, **bearer(mint("u-1"))})
+    assert r.status_code == 422
+
+
+def test_unwatch_with_a_nul_byte_is_404_not_500(mint, with_db):
+    r = client.delete("/watchlist/a%00b", headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "not on your watchlist")
+
+
+def _lab_html():
+    from pathlib import Path
+    return (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+
+
+def test_lab_links_only_open_http_urls():
+    import re
+    html = _lab_html()
+    hrefs = re.findall(r'href="\$\{([^}]*)\}"', html)
+    assert hrefs and all(h.startswith("safeHref(") for h in hrefs)
+    assert "function safeHref" in html and "/^https?:$/" in html
+
+
+def test_supabase_js_is_pinned_with_sri():
+    import re
+    # The package's real file: jsDelivr's generated supabase.min.js must not carry SRI.
+    assert re.search(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/supabase-js@2\.45\.4/dist/umd/supabase\.js"'
+                     r' integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"'
+                     r' crossorigin="anonymous"></script>', _lab_html())
