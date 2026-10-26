@@ -33,9 +33,12 @@ def test_semantic_cache_hit_and_miss():
     assert c.get([0.0, 1.0]) is None               # different meaning → miss
 
 
-def test_semantic_offline_fallback_returns_verdicts():
-    # With no DATABASE_URL, /semantic falls back to snapshot retrieval and every
+def test_semantic_offline_fallback_returns_verdicts(monkeypatch):
+    # With no database, /semantic falls back to snapshot retrieval and every
     # result carries its two-signal verdict — so the UI can badge DEAL/SUSPICIOUS.
+    # Pin the offline mode: CI runs with a real DATABASE_URL.
+    from dealfinder import serve
+    monkeypatch.setattr(serve, "_DB", False)
     r = client.get("/semantic", params={"q": "noise cancelling headphones", "k": 6})
     assert r.status_code == 200
     body = r.json()

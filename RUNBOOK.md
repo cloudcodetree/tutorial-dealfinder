@@ -140,9 +140,9 @@ least *something* live in most niches.
 *optional* — `serve.py` sets `_DB` false and swallows upsert errors), but
 `/semantic` returns **503 "no database configured"** and search results stop
 being persisted/embedded. **Action:** check `DATABASE_URL` and the pgvector
-container/managed instance; `pgstore.migrate()` runs at startup, so a DB that
-comes back needs no app change — new searches resume persisting. Restart the app
-only if you want `_DB` re-evaluated immediately.
+container/managed instance. The app never migrates: if the schema is missing or
+behind, run `python -m dealfinder.migrate`, then restart the app so `_DB` is
+re-evaluated.
 
 ### LLM budget / cost exceeded
 **Symptom:** `ops.budget_status(spent, budget)` returns `"over"`; cost dashboard

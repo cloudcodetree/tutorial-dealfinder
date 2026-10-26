@@ -69,6 +69,7 @@ For a transportable dev environment â€” no host Python/Node/pnpm, just Docker â€
 ```bash
 cp .env.example .env                    # optional: add live-source / Supabase / Stripe keys
 docker compose up                       # start db + backend + frontend
+docker compose exec backend python -m dealfinder.migrate   # create/upgrade the dealfinder schema
 docker compose --profile seed up seed   # one-shot: populate pgvector from the 270-item snapshot
 docker compose down                     # stop  (add -v to also delete the pgvector volume)
 ```
@@ -78,6 +79,9 @@ docker compose down                     # stop  (add -v to also delete the pgvec
 - **No keys needed:** without `.env`, live search falls back to the frozen snapshot
   and the auth/billing inspectors use throwaway demo secrets. Add keys to `.env`
   (and set `DEALFINDER_ENABLE_PAID_SOURCES=1`) to hit live sources.
+- **Database schema:** numbered SQL files in `dealfinder/migrations/` build the
+  `dealfinder` schema. Run `python -m dealfinder.migrate` once, and again after pulling
+  new migrations. The app never migrates on startup: `/readyz` reports a pending schema.
 - **"By meaning" search:** empty pgvector falls back to snapshot retrieval; run the
   `seed` profile once to populate it with real embeddings.
 - This supersedes running `uvicorn` / `vite` / a standalone pgvector container by hand.

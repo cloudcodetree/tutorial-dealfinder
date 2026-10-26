@@ -4,12 +4,28 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A real pgvector so the DB tests (RLS, migrations, watchlist) run instead of skipping.
+    services:
+      db:
+        image: pgvector/pgvector:0.7.0-pg16
+        env:
+          POSTGRES_USER: dealfinder
+          POSTGRES_PASSWORD: dealfinder
+          POSTGRES_DB: dealfinder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dealfinder -d dealfinder"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://dealfinder:dealfinder@localhost:5432/dealfinder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
+      - run: python -m dealfinder.migrate
       # Correctness first: style used to run ahead of the tests, so a lint failure
       # skipped pytest entirely and a real breakage (the mcp 2.x rename) sat hidden
       # behind red CI for weeks. Tests and the eval gate now always report.

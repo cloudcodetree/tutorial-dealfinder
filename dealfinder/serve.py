@@ -7,6 +7,7 @@ discussed in the tutorial; this is the shape they hang off.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import statistics
 from functools import lru_cache
@@ -16,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import pgstore
+from . import migrate, pgstore
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -30,16 +31,20 @@ from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
 
-# Persistence is optional: if DATABASE_URL points at a reachable pgvector, we
+# Persistence is optional: if DATABASE_URL points at a migrated pgvector, we
 # persist + enable semantic search; otherwise the app still does live search.
-_DB = bool(os.getenv("DATABASE_URL"))
-if _DB:
-    try:
-        pgstore.migrate()
-        from . import userstore
-        userstore.migrate()   # per-user private tables (watchlist), RLS by user_id
-    except Exception:
-        _DB = False
+# Serving never migrates: run `python -m dealfinder.migrate` first.
+def _db_ready() -> bool:
+    if not os.getenv("DATABASE_URL"):
+        return False
+    ready = migrate.schema_ready()
+    if not ready:
+        logging.getLogger("dealfinder").warning(
+            "DATABASE_URL is set but the schema is not ready; run `python -m dealfinder.migrate`")
+    return ready
+
+
+_DB = _db_ready()
 
 
 def _embed_texts(texts):

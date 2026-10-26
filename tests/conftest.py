@@ -30,3 +30,21 @@ def _offline_keys(monkeypatch):
         for k in _KEYS:
             monkeypatch.delenv(k, raising=False)
     yield
+
+
+@pytest.fixture
+def db():
+    """A migrated database URL for DB tests; skips when none is reachable.
+
+    Offline runs (no DATABASE_URL) skip every DB test, so the suite stays green
+    without Postgres. CI sets DATABASE_URL to a pgvector service, so they run."""
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        pytest.skip("DATABASE_URL not set")
+    from dealfinder import migrate
+
+    try:
+        migrate.apply(url)
+    except Exception as e:  # unreachable DB in this environment
+        pytest.skip(f"db unavailable: {e}")
+    return url
