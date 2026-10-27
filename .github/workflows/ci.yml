@@ -50,10 +50,38 @@ jobs:
       - run: npm test
       - run: npx tsc --noEmit
 
+  # Production deploy: main only, after both test jobs. GitHub mints a short-lived
+  # OIDC token and Workload Identity Federation trades it for the deploy service
+  # account (deploy/gcp/wif.tf), so no Google key exists anywhere. Every value
+  # reaches the shell through env:, never through an expression inside run:.
   deploy:
-    needs: test
-    if: github.ref == 'refs/heads/main'
+    needs: [test, edge]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/dealfinder/api:${{ github.sha }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_EDGE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "build the Docker image and push to your registry / PaaS here"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      - run: docker build -t "$IMAGE" . && docker push "$IMAGE"
+      - run: gcloud run deploy dealfinder-api --image "$IMAGE" --region us-central1 --project "$GCP_PROJECT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: npm ci && npx wrangler deploy
+        working-directory: edge
+      - name: smoke check through the Worker
+        run: curl -fsS https://deals.cloudcodetree.com/api/healthz && curl -fsS https://deals.cloudcodetree.com/api/readyz
