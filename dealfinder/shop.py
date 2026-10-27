@@ -286,6 +286,33 @@ def shop_search(q: str, k: int = 12) -> dict:
     }
 
 
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) >= 2}
+
+
+@lru_cache(maxsize=1)
+def _snapshot_words() -> list[tuple[str, set[str]]]:
+    from .tools import load_catalog
+
+    return [(p.category, _words(p.title)) for p in load_catalog()]
+
+
+def _category_from_snapshot(title: str) -> str | None:
+    """The category of the snapshot listing that shares most of the title's words.
+
+    A shopper often types only the model ("Sony WH-1000XM5"), which names no
+    product type. At least two words, and three quarters of them, must match."""
+    want = _words(title)
+    if len(want) < 2:
+        return None
+    best, score = None, 0.0
+    for cat, have in _snapshot_words():
+        s = len(want & have) / len(want)
+        if s > score:
+            best, score = cat, s
+    return best if score >= 0.75 else None
+
+
 def _fair_for(title: str) -> tuple[str | None, float | None]:
     """The title's category and the snapshot model's fair price for it.
 
@@ -296,7 +323,7 @@ def _fair_for(title: str) -> tuple[str | None, float | None]:
     from .features import featurize
     from .schema import Product
 
-    cat = guess_category(title)
+    cat = guess_category(title) or _category_from_snapshot(title)
     model = _models().get(cat) if cat else None
     if model is None:
         return cat, None

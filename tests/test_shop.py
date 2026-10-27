@@ -158,3 +158,15 @@ def test_check_on_a_real_title(monkeypatch):
     monkeypatch.delenv("DEALFINDER_VERDICT_MODE", raising=False)
     r = shop.check_deal("Sony WH-1000XM5 Wireless Noise Canceling Headphones", 199.0)
     assert (r["category"], r["fair"], r["verdict"]) == ("audio", 285.15, "deal")
+
+
+def test_check_finds_the_category_from_a_bare_model_name(monkeypatch):
+    # Shoppers type the model, not the product type. The category comes from the
+    # snapshot listing that shares the title's words when the wording alone says nothing.
+    monkeypatch.delenv("DEALFINDER_VERDICT_MODE", raising=False)
+    r = shop.check_deal("Sony WH-1000XM5", 199.0)
+    assert r["category"] == "audio" and r["verdict"] is not None and r["basis"] == "model"
+
+
+def test_check_does_not_guess_from_a_weak_match():
+    assert shop._fair_for("Mystery widget 3000") == (None, None)
