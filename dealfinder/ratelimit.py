@@ -54,28 +54,29 @@ class Limiter:
         now = self._clock()
         key = f"{path}|{client}"
         if window.allow(key, now):
-            if len(self) > self.max_keys:
-                self._shrink(now)
+            if len(window._events) > self.max_keys:
+                self._shrink(window, now)
             return None
         return window._events[key][0] + window.window - now
 
-    def _shrink(self, now: float) -> None:
-        """Keep memory under max_keys, even when every client is active.
+    def _shrink(self, window: SlidingWindowRateLimiter, now: float) -> None:
+        """Keep one path's clients under max_keys, even when every client is active.
 
-        Idle clients go first. If that is not enough, the least recently seen go,
-        down to 90% of the cap, so the next shrink waits for many new keys rather
-        than running on every request."""
-        for window in self._windows.values():
-            idle = [k for k, ev in window._events.items() if not ev or ev[-1] <= now - window.window]
-            for k in idle:
-                del window._events[k]
-        excess = len(self) - int(self.max_keys * 0.9)
+        Each path has its own budget, so a flood on a cheap route cannot push out
+        /ask state. Idle clients go first, then the least recently seen, down to
+        90% of the cap so the next shrink waits for many new keys. A client at its
+        limit is never evicted: forgetting it would reset its window, so a flood of
+        new clients could buy the limited one a fresh allowance. Those keys leave on
+        their own once their window passes."""
+        idle = [k for k, ev in window._events.items() if not ev or ev[-1] <= now - window.window]
+        for k in idle:
+            del window._events[k]
+        excess = len(window._events) - int(self.max_keys * 0.9)
         if excess <= 0:
             return
-        by_age = sorted(((ev[-1], w, k) for w in self._windows.values() for k, ev in w._events.items()),
-                        key=lambda t: t[0])
-        for _, window, key in by_age[:excess]:
-            del window._events[key]
+        open_keys = sorted((ev[-1], k) for k, ev in window._events.items() if len(ev) < window.limit)
+        for _, k in open_keys[:excess]:
+            del window._events[k]
 
 
 def client_key(request) -> str:

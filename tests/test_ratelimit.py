@@ -73,3 +73,21 @@ def test_memory_stays_capped_while_every_client_is_active():
 def test_llm_routes_are_limited_hardest():
     for path in ("/ask", "/ask_agentic", "/review"):
         assert ratelimit.LIMITS[path] == (5, 60), path
+
+
+def test_a_flood_of_new_clients_cannot_evict_a_limited_one():
+    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=100)
+    for _ in range(5):
+        lim.check("/ask", "attacker")
+    assert lim.check("/ask", "attacker") is not None
+    for i in range(300):
+        lim.check("/ask", f"10.1.{i // 250}.{i % 250}")
+    assert lim.check("/ask", "attacker") is not None      # still limited
+
+
+def test_each_path_has_its_own_key_budget():
+    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=100)
+    lim.check("/ask", "victim-state")
+    for i in range(300):
+        lim.check("/search", f"10.2.{i // 250}.{i % 250}")
+    assert "/ask|victim-state" in lim._windows["/ask"]._events
