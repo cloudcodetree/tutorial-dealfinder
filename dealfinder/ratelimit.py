@@ -20,6 +20,10 @@ from collections.abc import Callable
 from .compliance import SlidingWindowRateLimiter
 from .settings import is_production
 
+# A full cleanup scan runs at most this often per path, so a table that cannot be
+# shrunk does not cost a scan on every request.
+SHRINK_EVERY_S = 1.0
+
 # path -> (requests, window seconds). The routes that can call an LLM are limited hardest:
 # /ask, /ask_agentic, and /review, whose writer drafts with the LLM.
 LIMITS: dict[str, tuple[int, float]] = {
@@ -35,13 +39,18 @@ LIMITS: dict[str, tuple[int, float]] = {
 
 
 class Limiter:
-    """One sliding window per limited path, keyed by `path|client`."""
+    """One sliding window per limited path, keyed by `path|client`.
+
+    Memory per path stays under max_keys after each cleanup and never passes
+    2 * max_keys. Past that ceiling a new client waits one window while every
+    client already tracked keeps its own count."""
 
     def __init__(self, limits: dict[str, tuple[int, float]] = LIMITS, *,
                  clock: Callable[[], float] = time.monotonic, max_keys: int = 10_000) -> None:
         self._windows = {path: SlidingWindowRateLimiter(n, w) for path, (n, w) in limits.items()}
         self._clock = clock
         self.max_keys = max_keys
+        self._last_shrink: dict[str, float] = {}
 
     def __len__(self) -> int:
         return sum(len(w._events) for w in self._windows.values())
@@ -53,11 +62,22 @@ class Limiter:
             return None
         now = self._clock()
         key = f"{path}|{client}"
-        if window.allow(key, now):
-            if len(window._events) > self.max_keys:
-                self._shrink(window, now)
+        events = window._events
+        if key not in events and len(events) >= 2 * self.max_keys:
+            self._maybe_shrink(path, window, now)
+            if len(events) >= 2 * self.max_keys:
+                return window.window
+        allowed = window.allow(key, now)
+        if len(events) > self.max_keys:
+            self._maybe_shrink(path, window, now)
+        if allowed:
             return None
-        return window._events[key][0] + window.window - now
+        return events[key][0] + window.window - now
+
+    def _maybe_shrink(self, path: str, window: SlidingWindowRateLimiter, now: float) -> None:
+        if now - self._last_shrink.get(path, float("-inf")) >= SHRINK_EVERY_S:
+            self._last_shrink[path] = now
+            self._shrink(window, now)
 
     def _shrink(self, window: SlidingWindowRateLimiter, now: float) -> None:
         """Keep one path's clients under max_keys, even when every client is active.

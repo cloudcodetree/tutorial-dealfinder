@@ -64,10 +64,33 @@ def test_ipv6_clients_share_a_slash_64(monkeypatch):
 
 
 def test_memory_stays_capped_while_every_client_is_active():
-    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=100)
+    t = [0.0]
+    lim = ratelimit.Limiter(clock=lambda: t[0], max_keys=100)
     for i in range(150):
         lim.check("/ask", f"10.0.{i // 250}.{i % 250}")
-    assert len(lim) <= 100
+    assert len(lim) <= 200                 # hard ceiling between cleanups
+    t[0] = 1.0
+    lim.check("/ask", "10.0.9.9")
+    assert len(lim) <= 100                 # the next cleanup brings it back under the cap
+
+
+def test_cleanup_scans_at_most_once_a_second():
+    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=100)
+    scans = []
+    real = lim._shrink
+    lim._shrink = lambda w, now: scans.append(now) or real(w, now)
+    for i in range(400):
+        lim.check("/ask", f"10.3.{i // 250}.{i % 250}")
+    assert len(scans) == 1
+
+
+def test_new_clients_wait_when_the_table_is_full_of_limited_ones():
+    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=10)
+    for i in range(20):
+        for _ in range(5):
+            lim.check("/ask", f"busy-{i}")
+    assert lim.check("/ask", "newcomer") == 60          # fails closed for untracked clients
+    assert len(lim) <= 20
 
 
 def test_llm_routes_are_limited_hardest():
