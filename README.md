@@ -55,6 +55,34 @@ Work through it **version by version** — each step is a git tag:
 git checkout step-02   # then step-03, step-04, …
 ```
 
+## Live sources, verdicts and store terms
+
+Each store's terms decide what DealFinder may do with its rows. One table,
+`dealfinder/licensing.py`, holds those rules, and every signal checks it first:
+
+| Store | Verdict | Stored | Embedded | Ranked with other stores | Kept at most |
+|---|---|---|---|---|---|
+| Best Buy | yes | yes | yes | yes | 72 h (purged at 59 h) |
+| eBay | no | no | no | no | 15 min in memory |
+| Unknown source | no | no | no | no | not kept |
+
+The course sources (RapidAPI, Apify, Amazon, Shopify, Firecrawl, iTunes) keep the
+lessons working and are off in production.
+
+- **The eBay box.** eBay listings never join the ranked results. `/search` returns
+  them in a separate `ebay` object, in eBay's own order, with no verdict or score.
+  It is hidden without production eBay keys, and sandbox listings are fake, so they
+  show only with `DEALFINDER_EBAY_ALLOW_SANDBOX=1`.
+- **Retention.** `python -m dealfinder.retention` deletes Best Buy rows before they
+  are 72 hours old and any row the terms do not allow storing. See `RUNBOOK.md`.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DEALFINDER_SOURCES` | every course source | Comma list of live sources for `/search`. Production: `BestBuy`. Naming `eBay` is an error. |
+| `DEALFINDER_VERDICT_MODE` | `live` | `live` rates Best Buy rows. `check` turns ratings off and leaves only `/check` (Check a deal). Any other value acts as `check`. |
+| `DEALFINDER_SOURCE_TIMEOUT_S` | `8` | Seconds each source gets before it is skipped and benched. |
+| `DEALFINDER_EBAY_ALLOW_SANDBOX` | unset | `1` shows eBay sandbox listings in the eBay box, for development. |
+
 ## Run the whole stack in one command (Docker Compose)
 
 For a transportable dev environment — no host Python/Node/pnpm, just Docker —
