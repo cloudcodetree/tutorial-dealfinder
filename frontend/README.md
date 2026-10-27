@@ -33,8 +33,7 @@ Copy `.env.example` → `.env.local`:
 | `VITE_SUPABASE_ANON_KEY` | Your Supabase anon (public) key. |
 
 Only `VITE_`-prefixed, **public** values belong here — the Supabase anon key is
-public by design; never put a service-role key or the API's `SUPABASE_JWT_SECRET`
-in the frontend.
+public by design; never put a service-role key or any other secret in the frontend.
 
 ## Run it
 
@@ -59,7 +58,7 @@ same-origin without CORS.
   source), so you'll see cards stream in immediately.
 - **Sign-in + `/me` + the pro gate need the learner's own Supabase project.**
   Set `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` here, and set the matching
-  `SUPABASE_JWT_SECRET` on the backend (see `dealfinder/auth.py`). Without them,
+  `SUPABASE_URL` on the backend, whose JWKS verifies the token (see `dealfinder/auth.py`). Without them,
   the Auth panel says auth is off and the app runs anonymously.
 
 ## Build

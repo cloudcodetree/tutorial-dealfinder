@@ -3,19 +3,42 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
+from dealfinder import db as db_mod
+from dealfinder import pgstore, serve, userstore
 from dealfinder.cache import SemanticCache
 from dealfinder.serve import _catalog, app
+from tests.conftest import bearer
 
 client = TestClient(app)
+
+
+def raise_(exc):
+    raise exc
 
 
 def _id(needle):
     return next(p.id for p in _catalog if needle.lower() in p.title.lower())
 
 
-def test_healthz():
-    r = client.get("/healthz")
-    assert r.status_code == 200 and r.json()["status"] == "ok"
+def test_healthz_is_liveness_only():
+    assert client.get("/healthz").json() == {"status": "ok"}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_readiness(monkeypatch):
+    monkeypatch.setattr(serve, "_READY", None)
+
+
+def test_readyz_without_db(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert client.get("/readyz").json() == {"db": "disabled"}
+
+
+def test_readyz_db_down(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://nobody@127.0.0.1:9/none")
+    monkeypatch.setattr(db_mod, "ping", lambda *a, **k: False)
+    r = client.get("/readyz")
+    assert (r.status_code, r.json()) == (503, {"db": "down"})
 
 
 def test_deal_endpoint():
@@ -33,9 +56,12 @@ def test_semantic_cache_hit_and_miss():
     assert c.get([0.0, 1.0]) is None               # different meaning → miss
 
 
-def test_semantic_offline_fallback_returns_verdicts():
-    # With no DATABASE_URL, /semantic falls back to snapshot retrieval and every
+def test_semantic_offline_fallback_returns_verdicts(monkeypatch):
+    # With no database, /semantic falls back to snapshot retrieval and every
     # result carries its two-signal verdict — so the UI can badge DEAL/SUSPICIOUS.
+    # Pin the offline mode: CI runs with a real DATABASE_URL.
+    from dealfinder import serve
+    monkeypatch.setattr(serve, "_DB", False)
     r = client.get("/semantic", params={"q": "noise cancelling headphones", "k": 6})
     assert r.status_code == 200
     body = r.json()
@@ -273,14 +299,15 @@ def test_auth_endpoint_reports_every_jwt_verdict():
     r = client.get("/auth")
     assert r.status_code == 200
     b = r.json()
-    assert b["algo"] == "HS256" and b["audience"] == "authenticated"
+    assert b["algo"] == "ES256" and b["audience"] == "authenticated"
     by_name = {s["name"]: s["result"] for s in b["scenarios"]}
     assert by_name["valid · pro"]["status"] == 200
     assert by_name["valid · pro"]["user"] == {"id": "u1", "email": "pro@x.com", "role": "pro"}
     assert by_name["valid · free"]["user"]["role"] == "free"
     assert by_name["expired"] == {"status": 401, "detail": "token expired"}
     assert by_name["tampered"] == {"status": 401, "detail": "invalid token"}
-    assert by_name["wrong secret"] == {"status": 401, "detail": "invalid token"}
+    assert by_name["wrong key"] == {"status": 401, "detail": "invalid token"}
+    assert by_name["HS256 forgery"] == {"status": 401, "detail": "invalid token"}
     assert by_name["missing subject"] == {"status": 401, "detail": "token missing subject"}
     assert by_name["role gate: free → /pro"] == {"status": 403, "detail": "requires role 'pro'"}
     assert by_name["role gate: pro → /pro"]["status"] == 200
@@ -351,3 +378,160 @@ def test_compliance_endpoint_reports_ratelimit_gdpr_and_abuse():
     assert b["abuse"]["velocity_burst"]["flagged"] is True
     assert any("velocity" in x for x in b["abuse"]["velocity_burst"]["reasons"])
     assert b["abuse"]["normal_use"]["flagged"] is False
+
+
+@pytest.fixture
+def with_db(monkeypatch):
+    monkeypatch.setattr(serve, "_DB", True)
+
+
+def test_client_price_is_rejected(mint, with_db):
+    r = client.post("/watchlist", json={"offer_id": "off-1", "target_price": 40, "last_price": 1},
+                    headers=bearer(mint("u-1")))
+    assert r.status_code == 422
+    assert [e["loc"][-1] for e in r.json()["detail"] if e["type"] == "extra_forbidden"] == ["last_price"]
+
+
+def test_watch_unknown_offer_is_404(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_watch", lambda *a, **k: raise_(LookupError()))
+    r = client.post("/watchlist", json={"offer_id": "nope"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "offer not found — search for it first")
+
+
+def test_watch_cap_is_409(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_watch", lambda *a, **k: raise_(userstore.LimitExceeded()))
+    r = client.post("/watchlist", json={"offer_id": "off-1"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (409, "watchlist limit reached (200)")
+
+
+def test_target_price_must_be_positive(mint, with_db):
+    r = client.post("/watchlist", json={"offer_id": "off-1", "target_price": 0}, headers=bearer(mint("u-1")))
+    assert r.status_code == 422
+    assert [e["loc"] for e in r.json()["detail"]] == [["body", "target_price"]]
+
+
+def test_ranked_remembers_shown_offers(monkeypatch, stub_sources, with_db):
+    calls = []
+    monkeypatch.setattr(pgstore, "upsert", lambda rows, embs, tenant="public", url=None: calls.append((rows, embs, tenant)))
+    body = client.get("/ranked", params={"q": "headphones", "k": 2}).json()
+    assert len(calls) == 1
+    rows, embs, tenant = calls[0]
+    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and embs is None and tenant == "public"
+
+
+def test_remembering_offers_never_breaks_ranked(monkeypatch, stub_sources, with_db):
+    monkeypatch.setattr(pgstore, "upsert", lambda *a, **k: raise_(RuntimeError("db down")))
+    assert client.get("/ranked", params={"q": "headphones"}).status_code == 200
+
+
+@pytest.mark.parametrize("body", [{"query": ""}, {"query": "x" * 201}, {"query": "ok", "max_price": -1},
+                                  {"query": "ok", "extra": 1}])
+def test_saved_search_validation(mint, body):
+    assert client.post("/saved-searches", json=body, headers=bearer(mint("u-1"))).status_code == 422
+
+
+def test_saved_search_cap_is_409(mint, monkeypatch, with_db):
+    monkeypatch.setattr(userstore, "add_saved_search", lambda *a, **k: raise_(userstore.LimitExceeded()))
+    r = client.post("/saved-searches", json={"query": "ok"}, headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (409, "saved-search limit reached (50)")
+
+
+def test_delete_malformed_id_is_404(mint):
+    r = client.delete("/saved-searches/not-a-uuid", headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "saved search not found")
+
+
+def test_config_json_exposes_only_public_settings(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://tgcysgioncdmtzcfknix.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://secret-user:secret-pass@db/x")
+    r = client.get("/config.json")
+    assert set(r.json()) == {"supabaseUrl", "supabasePublishableKey", "providers"}
+    assert "secret-pass" not in r.text
+
+
+def test_lab_has_no_dev_identity():
+    from pathlib import Path
+    html = (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+    assert "X-User-Id" not in html and "prompt(" not in html
+    assert "@supabase/supabase-js@2.45.4" in html
+
+
+def test_readyz_is_cached_and_uses_the_pool(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql://nobody@127.0.0.1:9/none")
+    calls = []
+    monkeypatch.setattr(db_mod, "ping", lambda *a, **k: calls.append("ping") or True)
+    monkeypatch.setattr(db_mod, "schema_current", lambda *a, **k: calls.append("schema") or True)
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: pytest.fail("readyz must not open its own connection"))
+    assert client.get("/readyz").json() == {"db": "ok", "schema": "current"}
+    assert client.get("/readyz").json() == {"db": "ok", "schema": "current"}
+    assert calls == ["ping", "schema"]
+
+
+def test_account_routes_recheck_a_database_that_came_up_late(monkeypatch):
+    monkeypatch.setattr(serve, "_DB", False)
+    monkeypatch.setattr(serve, "_DB_CHECKED_AT", float("-inf"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: True)
+    serve._require_db()
+    assert serve._DB is True
+
+
+def test_database_recheck_is_throttled(monkeypatch):
+    import time
+    monkeypatch.setattr(serve, "_DB", False)
+    monkeypatch.setattr(serve, "_DB_CHECKED_AT", time.monotonic())
+    monkeypatch.setenv("DATABASE_URL", "postgresql://app@db/x")
+    monkeypatch.setattr(serve.migrate, "schema_ready", lambda *a, **k: pytest.fail("rechecked too soon"))
+    with pytest.raises(Exception) as exc:
+        serve._require_db()
+    assert exc.value.status_code == 503
+
+
+_JSON = {"Content-Type": "application/json"}
+
+
+@pytest.mark.parametrize("raw", ['{"offer_id": "off-1", "target_price": Infinity}',
+                                 '{"offer_id": "off-1", "target_price": NaN}',
+                                 '{"offer_id": "off-1", "target_price": 1e400}',
+                                 '{"offer_id": "off-1", "target_price": 2000000}',
+                                 '{"offer_id": "a\\u0000b"}'])
+def test_watch_rejects_non_finite_huge_or_nul_input(mint, with_db, raw):
+    r = client.post("/watchlist", content=raw, headers={**_JSON, **bearer(mint("u-1"))})
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("raw", ['{"query": "ok", "max_price": Infinity}',
+                                 '{"query": "ok", "max_price": NaN}',
+                                 '{"query": "ok", "max_price": 2000000}',
+                                 '{"query": "a\\u0000b"}'])
+def test_saved_search_rejects_non_finite_huge_or_nul_input(mint, with_db, raw):
+    r = client.post("/saved-searches", content=raw, headers={**_JSON, **bearer(mint("u-1"))})
+    assert r.status_code == 422
+
+
+def test_unwatch_with_a_nul_byte_is_404_not_500(mint, with_db):
+    r = client.delete("/watchlist/a%00b", headers=bearer(mint("u-1")))
+    assert (r.status_code, r.json()["detail"]) == (404, "not on your watchlist")
+
+
+def _lab_html():
+    from pathlib import Path
+    return (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+
+
+def test_lab_links_only_open_http_urls():
+    import re
+    html = _lab_html()
+    hrefs = re.findall(r'href="\$\{([^}]*)\}"', html)
+    assert hrefs and all(h.startswith("safeHref(") for h in hrefs)
+    assert "function safeHref" in html and "/^https?:$/" in html
+
+
+def test_supabase_js_is_pinned_with_sri():
+    import re
+    # The package's real file: jsDelivr's generated supabase.min.js must not carry SRI.
+    assert re.search(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/supabase-js@2\.45\.4/dist/umd/supabase\.js"'
+                     r' integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"'
+                     r' crossorigin="anonymous"></script>', _lab_html())

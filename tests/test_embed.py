@@ -14,6 +14,7 @@ import threading
 import time
 
 import dealfinder.embed as embed
+from dealfinder import dedup
 
 
 def _install_fake_model(monkeypatch):
@@ -66,3 +67,17 @@ def test_warm_eagerly_loads_the_model(monkeypatch):
         assert calls["n"] == 1
     finally:
         embed._model = None
+
+
+def test_one_embedding_model_per_process(monkeypatch):
+    made = []
+
+    class Fake:
+        def __init__(self, *a, **k): made.append(1)
+        def embed(self, texts): return [[0.0] * 384 for _ in texts]
+
+    monkeypatch.setattr("fastembed.TextEmbedding", Fake)
+    monkeypatch.setattr(embed, "_model", None)
+    embed._get_model()
+    dedup._embed(["a", "b"])
+    assert len(made) == 1

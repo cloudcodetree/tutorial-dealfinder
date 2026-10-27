@@ -7,16 +7,23 @@ discussed in the tutorial; this is the shape they hang off.
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import statistics
+import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import pgstore
+from . import db, migrate, pgstore
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -30,16 +37,52 @@ from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
 
-# Persistence is optional: if DATABASE_URL points at a reachable pgvector, we
+
+def _json_safe(value):
+    """Make a validation error echo serializable: NaN/Infinity become strings."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request, exc: RequestValidationError):
+    """FastAPI's default 422, except a rejected NaN or Infinity can't turn it into a 500."""
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+# Persistence is optional: if DATABASE_URL points at a migrated pgvector, we
 # persist + enable semantic search; otherwise the app still does live search.
-_DB = bool(os.getenv("DATABASE_URL"))
-if _DB:
-    try:
-        pgstore.migrate()
-        from . import userstore
-        userstore.migrate()   # per-user private tables (watchlist), RLS by user_id
-    except Exception:
-        _DB = False
+# Serving never migrates: run `python -m dealfinder.migrate` first.
+def _db_ready() -> bool:
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        return False
+    ready = migrate.schema_ready(url)
+    if not ready:
+        logging.getLogger("dealfinder").warning(
+            "DATABASE_URL is set but the schema is not ready; run `python -m dealfinder.migrate`")
+    return ready
+
+
+_DB = _db_ready()
+_DB_CHECKED_AT = time.monotonic()
+_DB_RECHECK_S = 30.0   # a database that comes up after boot is picked up within this
+
+
+def _maybe_recheck_db() -> None:
+    """Re-evaluate _DB when it is off, at most every _DB_RECHECK_S, so an instance
+    that booted while the database was down recovers without a restart."""
+    global _DB, _DB_CHECKED_AT
+    if _DB or not os.getenv("DATABASE_URL"):
+        return
+    if time.monotonic() - _DB_CHECKED_AT < _DB_RECHECK_S:
+        return
+    _DB_CHECKED_AT = time.monotonic()
+    _DB = _db_ready()
 
 
 def _embed_texts(texts):
@@ -80,7 +123,44 @@ def _warm_embed_model() -> None:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "products": len(_catalog)}
+    """Liveness: the process answers. Never touches the database."""
+    return {"status": "ok"}
+
+
+@app.get("/config.json")
+def public_config():
+    """Public browser settings, and nothing else: the Supabase project URL, its
+    publishable key (public by design) and the sign-in providers. Null when unset."""
+    return {
+        "supabaseUrl": os.getenv("SUPABASE_URL") or None,
+        "supabasePublishableKey": os.getenv("SUPABASE_PUBLISHABLE_KEY") or None,
+        "providers": ["google", "github"],
+    }
+
+
+_READY: tuple[float, int, dict] | None = None   # (checked_at, status, body)
+_READY_TTL_S = 30.0
+
+
+@app.get("/readyz")
+def readyz():
+    """Readiness: the database answers and its schema is current.
+
+    Checked through the request pool and cached for _READY_TTL_S, so probing it
+    never opens extra connections to the shared project."""
+    global _READY, _DB
+    if not os.getenv("DATABASE_URL"):
+        return {"db": "disabled"}
+    if _READY is None or time.monotonic() - _READY[0] >= _READY_TTL_S:
+        if not db.ping():
+            status, body = 503, {"db": "down"}
+        elif not db.schema_current():
+            status, body = 503, {"db": "ok", "schema": "pending"}
+        else:
+            status, body = 200, {"db": "ok", "schema": "current"}
+            _DB = True
+        _READY = (time.monotonic(), status, body)
+    return JSONResponse(_READY[2], status_code=_READY[1])
 
 
 @app.get("/search")
@@ -91,7 +171,7 @@ def search(q: str, who: Principal = Depends(current_principal)):
     if _DB and result["results"]:
         try:
             texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
-            pgstore.upsert(result["results"], _embed_texts(texts), query=q, tenant=who.tenant_id)
+            pgstore.upsert(result["results"], _embed_texts(texts), tenant=who.tenant_id)
             result["persisted"] = pgstore.count(tenant=who.tenant_id)
             result["tenant"] = who.tenant_id
         except Exception:
@@ -147,7 +227,8 @@ def _deal_reason(verdict, m, rf, fair, basis) -> str:
 
 
 @app.get("/ranked")
-def ranked(q: str, k: int = 12):
+def ranked(q: str, background: BackgroundTasks, k: int = 12,
+           who: Principal = Depends(current_principal)):
     """LIVE value-ranked deals for ANY query, with the two-signal verdict via a
     layered fair-price estimator (a graceful-degradation design — the point of a
     robust deal finder, not a headphones-only demo).
@@ -216,6 +297,7 @@ def ranked(q: str, k: int = 12):
         return s
     scored.sort(key=_value, reverse=True)
     scored = scored[:k]
+    background.add_task(_remember_offers, scored, who.tenant_id)   # after the response: a shown deal can be watched
     return {
         "query": q,
         "count": len(scored),
@@ -238,28 +320,52 @@ def redesign():
 
 
 # ── Consumer accounts: the per-user watchlist (P1). Private per user via RLS. ──
+# A shopper-entered price: positive, finite (no NaN or Infinity) and below a
+# million dollars. An offer id: 1-200 characters with no NUL byte (Postgres text
+# can't hold one).
+Money = Annotated[float, Field(gt=0, lt=1_000_000, allow_inf_nan=False)]
+OfferId = Annotated[str, StringConstraints(min_length=1, max_length=200, pattern=r"^[^\x00]+$")]
+
+
 class WatchIn(BaseModel):
-    id: str
-    title: str
-    url: str | None = None
-    image_url: str | None = None
-    source: str | None = None
-    target_price: float | None = None
-    last_price: float | None = None
+    """What a client may send: which offer, and an optional target. Never a price."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    offer_id: OfferId
+    target_price: Money | None = None
 
 
 def _require_db() -> None:
+    _maybe_recheck_db()
     if not _DB:
         raise HTTPException(status_code=503, detail="accounts need a database (set DATABASE_URL)")
 
 
-@app.post("/watchlist")
+def _remember_offers(results: list[dict], tenant: str) -> None:
+    """Store shown offers in the tenant's catalog so a shopper can watch them.
+
+    Best-effort: a database problem never breaks search."""
+    if not _DB or not results:
+        return
+    try:
+        pgstore.upsert(results, None, tenant=tenant)
+    except Exception:
+        logging.getLogger("dealfinder").warning("could not remember %d offers", len(results), exc_info=True)
+
+
+@app.post("/watchlist", status_code=201)
 def watchlist_add(item: WatchIn, who: Principal = Depends(require_account)):
-    """Add (or update) an item on the signed-in user's watchlist. Store the price
-    seen now + an optional target; a price-drop is when last_price <= target_price."""
+    """Watch an offer the signed-in user was shown. The price comes from the
+    server's catalog; a price-drop is when last_price <= target_price."""
     _require_db()
     from . import userstore
-    return userstore.add_watch(who.user_id, item.model_dump())
+    try:
+        return userstore.add_watch(who.user_id, who.tenant_id, item.offer_id, item.target_price)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="offer not found — search for it first") from exc
+    except userstore.LimitExceeded as exc:
+        raise HTTPException(status_code=409, detail=f"watchlist limit reached ({userstore.WATCH_LIMIT})") from exc
 
 
 @app.get("/watchlist")
@@ -269,16 +375,61 @@ def watchlist_list(who: Principal = Depends(require_account)):
     _require_db()
     from . import userstore
     items = userstore.list_watch(who.user_id)
-    return {"user": who.user_id, "count": len(items), "items": items}
+    return {"count": len(items), "items": items}
 
 
-@app.delete("/watchlist/{item_id}")
-def watchlist_remove(item_id: str, who: Principal = Depends(require_account)):
+@app.delete("/watchlist/{offer_id}")
+def watchlist_remove(offer_id: str, who: Principal = Depends(require_account)):
+    if "\x00" in offer_id:
+        raise HTTPException(status_code=404, detail="not on your watchlist")
     _require_db()
     from . import userstore
-    if not userstore.remove_watch(who.user_id, item_id):
+    if not userstore.remove_watch(who.user_id, offer_id):
         raise HTTPException(status_code=404, detail="not on your watchlist")
-    return {"removed": item_id}
+    return {"removed": offer_id}
+
+
+class SavedSearchIn(BaseModel):
+    """A search to re-run for the user: 1-200 characters, an optional positive price cap."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200,
+                                            pattern=r"^[^\x00]+$")]
+    max_price: Money | None = None
+
+
+@app.post("/saved-searches", status_code=201)
+def saved_search_add(body: SavedSearchIn, who: Principal = Depends(require_account)):
+    _require_db()
+    from . import userstore
+    try:
+        return userstore.add_saved_search(who.user_id, body.query, body.max_price)
+    except userstore.LimitExceeded as exc:
+        raise HTTPException(status_code=409,
+                            detail=f"saved-search limit reached ({userstore.SAVED_SEARCH_LIMIT})") from exc
+
+
+@app.get("/saved-searches")
+def saved_search_list(who: Principal = Depends(require_account)):
+    _require_db()
+    from . import userstore
+    items = userstore.list_saved_searches(who.user_id)
+    return {"count": len(items), "items": items}
+
+
+@app.delete("/saved-searches/{search_id}")
+def saved_search_remove(search_id: str, who: Principal = Depends(require_account)):
+    """Delete one of the user's saved searches. A malformed id is simply not found."""
+    try:
+        uuid.UUID(search_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="saved search not found") from exc
+    _require_db()
+    from . import userstore
+    if not userstore.remove_saved_search(who.user_id, search_id):
+        raise HTTPException(status_code=404, detail="saved search not found")
+    return {"removed": search_id}
 
 
 def _sse(event: str | None, data: dict) -> str:
@@ -548,35 +699,41 @@ def ops_report():
 def _auth_report() -> dict:
     """Drive the canonical Supabase-JWT scenarios through auth.py — Part 32. Cached, offline.
 
-    Mints HS256 tokens with a throwaway demo secret (never the learner's real
-    SUPABASE_JWT_SECRET) and runs each through the real verifier, so every verdict
-    below is produced by dealfinder/auth.py — not hard-coded."""
+    Mints ES256 tokens with a throwaway demo key and verifies each against that
+    key's JWK Set through the real verifier (auth.verify_with_jwks), the same
+    checks a live project's JWKS gets. No global state changes and no network,
+    so every verdict below is produced by dealfinder/auth.py — not hard-coded."""
     import time
 
     import jwt
+    from cryptography.hazmat.primitives.asymmetric import ec
 
     from . import auth as A
 
-    demo_secret = "demo-inspector-secret-not-supabase"
+    demo_issuer = "https://demo-ref.supabase.co/auth/v1"
+    demo_key = ec.generate_private_key(ec.SECP256R1())
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    jwk = jwt.algorithms.ECAlgorithm.to_jwk(demo_key.public_key(), as_dict=True)
+    demo_jwks = {"keys": [{**jwk, "kid": "demo-kid", "alg": "ES256", "use": "sig"}]}
     now = int(time.time())
 
-    def _mint(secret=demo_secret, *, sub="user-123", email="a@b.com",
-              role="free", exp_delta=3600, drop_sub=False):
+    def _claims(*, sub="user-123", email="a@b.com", role="free", exp_delta=3600, drop_sub=False):
         claims = {
-            "sub": sub, "email": email, "aud": A._AUDIENCE,
+            "sub": sub, "email": email, "aud": A._AUDIENCE, "iss": demo_issuer,
             "iat": now, "exp": now + exp_delta,
             "app_metadata": {"plan": role},
         }
         if drop_sub:
             claims.pop("sub")
-        return jwt.encode(claims, secret, algorithm=A._ALGO)
+        return claims
+
+    def _mint(key=demo_key, **kw):
+        return jwt.encode(_claims(**kw), key, algorithm="ES256", headers={"kid": "demo-kid"})
 
     def _verify(token, need_role=None):
         """Run the exact require_user / require_role logic, minus the HTTP layer."""
-        prev = os.environ.get("SUPABASE_JWT_SECRET")
-        os.environ["SUPABASE_JWT_SECRET"] = demo_secret
         try:
-            claims = A._decode(token)  # HS256 signature + expiry + audience
+            claims = A.verify_with_jwks(token, demo_jwks, issuer=demo_issuer)
             sub = claims.get("sub")
             if not sub:
                 raise HTTPException(status_code=401, detail="token missing subject")
@@ -586,19 +743,16 @@ def _auth_report() -> dict:
             return {"status": 200, "user": {"id": user.id, "email": user.email, "role": user.role}}
         except HTTPException as exc:
             return {"status": exc.status_code, "detail": exc.detail}
-        finally:
-            if prev is None:
-                os.environ.pop("SUPABASE_JWT_SECRET", None)
-            else:
-                os.environ["SUPABASE_JWT_SECRET"] = prev
 
     tampered = _mint()
     tampered = tampered[:-3] + ("aaa" if tampered[-3:] != "aaa" else "bbb")
+    forged = jwt.encode(_claims(role="pro"), "guessed-secret", algorithm="HS256", headers={"kid": "demo-kid"})
 
     return {
-        "algo": A._ALGO,
+        "algo": "ES256",
         "audience": A._AUDIENCE,
-        "secret_source": "SUPABASE_JWT_SECRET (a throwaway demo secret is used here, never your real one)",
+        "key_source": "the project JWKS at {SUPABASE_URL}/auth/v1/.well-known/jwks.json "
+                      "(a throwaway demo key is used here)",
         "scenarios": [
             {"name": "valid · pro", "note": "well-formed token, app_metadata.plan=pro",
              "result": _verify(_mint(sub="u1", email="pro@x.com", role="pro"))},
@@ -608,8 +762,10 @@ def _auth_report() -> dict:
              "result": _verify(_mint(exp_delta=-10))},
             {"name": "tampered", "note": "last 3 signature chars flipped",
              "result": _verify(tampered)},
-            {"name": "wrong secret", "note": "signed with a different secret",
-             "result": _verify(_mint(secret="some-other-secret"))},
+            {"name": "wrong key", "note": "signed by a different private key, same kid",
+             "result": _verify(_mint(key=other_key))},
+            {"name": "HS256 forgery", "note": "alg switched to HS256 with a guessed secret",
+             "result": _verify(forged)},
             {"name": "missing subject", "note": "no sub claim",
              "result": _verify(_mint(drop_sub=True))},
             {"name": "role gate: free → /pro", "note": "require_role('pro') on a free user",
@@ -625,10 +781,10 @@ def auth_report():
     """Auth & accounts (Part 32): every JWT verdict, made visible.
 
     Drives canonical Supabase-style tokens — valid pro/free, expired, tampered,
-    wrong-secret, missing-subject, and the free/pro role gate — through the real
+    wrong-key, HS256-forgery, missing-subject, and the free/pro role gate — through the real
     dealfinder/auth.py verifier: 200 with a User, 401 for bad tokens, 403 for a
-    valid token lacking the role. Deterministic, offline, cached — uses a
-    throwaway demo secret, never your SUPABASE_JWT_SECRET."""
+    valid token lacking the role. Offline and cached: tokens are signed with a
+    throwaway demo key and verified against its JWK Set."""
     return _auth_report()
 
 
@@ -1172,7 +1328,7 @@ def me(user: User = Depends(require_user)):
     """Demo protected route (Part 32). Returns the caller identity from their
     verified Supabase JWT. Auth is *opt-in* per route — the public search/deal
     routes above stay open; only routes that depend on `require_user` are gated.
-    Runs live with the learner's own SUPABASE_JWT_SECRET."""
+    Runs live with the learner's own SUPABASE_URL (its JWKS verifies the token)."""
     return {"id": user.id, "email": user.email, "role": user.role}
 
 

@@ -639,7 +639,7 @@ function authPanel(d) {
     <div class="row" style="margin:0 0 8px;gap:8px">
       ${chip("#3fb950", "200 verified")} ${chip("#f85149", "401 rejected")} ${chip("#f0a30a", "403 forbidden")}
     </div>
-    <div style="font-size:12px;color:#8b98a8;margin:0 0 6px">Every row is a Supabase-style HS256 token run through the real <code>auth.py</code> verifier (<b>${esc(d.algo)}</b>, aud <b>${esc(d.audience)}</b>). A throwaway demo secret is used here — never your <code>SUPABASE_JWT_SECRET</code>.</div>
+    <div style="font-size:12px;color:#8b98a8;margin:0 0 6px">Every row is a Supabase-style token run through the real <code>auth.py</code> verifier (<b>${esc(d.algo)}</b>, aud <b>${esc(d.audience)}</b>), checked against a JWK Set the way a live project's JWKS is. A throwaway demo key is used here.</div>
     ${d.scenarios.map(row).join("")}
     <div style="font-size:12px;color:#8b98a8;margin-top:10px;border-top:1px solid #222a35;padding-top:10px">Two valid tokens resolve to a <b>User</b> with the plan read from <code>app_metadata</code>. Every bad token — expired, tampered, wrong secret, no subject — is a <b style="color:#f85149">401</b> ("we don't know who you are"). A valid free-tier token hitting a pro route is a <b style="color:#f0a30a">403</b> ("we know you, you lack the role"). Verify locally, no network round-trip.</div>
   </div>`;

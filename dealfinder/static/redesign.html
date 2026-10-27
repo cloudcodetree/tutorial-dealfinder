@@ -34,9 +34,16 @@ button{font:inherit;cursor:pointer;}
 .topbar{position:sticky;top:0;z-index:30;background:var(--color-bg);
   background-image:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent);
   background-repeat:no-repeat;background-position:bottom;background-size:100% 1px;}
-.topbar-inner{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-8);}
+.topbar-inner{position:relative;display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-8);}
 .brand{font-family:var(--font-heading);font-weight:500;font-size:18px;letter-spacing:-.015em;margin-right:auto;}
 .brand span{color:var(--color-accent);}
+.signin{position:absolute;right:var(--space-8);top:100%;display:flex;flex-direction:column;gap:var(--space-3);
+  width:280px;padding:var(--space-4);background:var(--color-surface);border:1px solid var(--color-neutral-800);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-sm);}
+.signin[hidden]{display:none;}
+.signin form{display:flex;flex-direction:column;gap:var(--space-2);}
+.signin input{font:inherit;color:var(--color-text);background:var(--color-bg);border:1px solid var(--color-divider);
+  border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);}
 .pill{font-size:11px;padding:3px 10px;border-radius:6px;background:var(--color-neutral-800);color:var(--color-neutral-400);}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-heading);font-weight:500;
   font-size:14px;color:var(--color-text);background:transparent;border:1px solid transparent;padding:var(--space-2) 13px;border-radius:var(--radius-md);}
@@ -151,6 +158,16 @@ button{font:inherit;cursor:pointer;}
       <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">nocturne redesign · wired to live endpoints</span>
       <span class="pill">free tier</span>
       <button class="btn btn-secondary" id="acct" type="button">Sign in</button>
+      <div id="signin" class="signin" hidden>
+        <form id="signinEmail">
+          <label class="mono" for="signinAddr">Email me a sign-in link</label>
+          <input id="signinAddr" type="email" required autocomplete="email" placeholder="you@example.com">
+          <button class="btn btn-secondary" type="submit">Send link</button>
+        </form>
+        <button class="btn btn-secondary" type="button" data-provider="google">Continue with Google</button>
+        <button class="btn btn-secondary" type="button" data-provider="github">Continue with GitHub</button>
+        <div id="signinMsg" class="mono" role="status"></div>
+      </div>
     </div>
   </div>
 
@@ -297,26 +314,72 @@ button{font:inherit;cursor:pointer;}
     </main>
   </div>
 
+<!-- The package's own UMD file (byte-identical to the npm tarball), pinned by SRI. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$" + Number(n).toFixed(2);
+// Offer links come from third-party sources. Only http(s) URLs become links, so a
+// javascript: URL can never run in a page that holds a sign-in token.
+function safeHref(u){
+  try{ const p = new URL(u, location.href); return /^https?:$/.test(p.protocol) ? esc(p.href) : '#'; }
+  catch(e){ return '#'; }
+}
 let state = { mode:"deals", q:"noise cancelling headphones" };
 let rankedThr = 0.70;   // suspicious-residual threshold; the backend sends the real value
-let userId = localStorage.getItem('df_user') || null;   // dev sign-in (real product: Supabase OAuth)
+// Real sign-in: Supabase Auth in the browser. The backend verifies the access
+// token against the project's JWKS; no header can claim an identity.
+let sb = null;          // the Supabase client, once /config.json says sign-in is configured
+let session = null;     // the current Supabase session (null when signed out)
 let lastResults = [];   // the current deals, so a card's "watch" button can find its item
-const authHeaders = () => userId ? {'X-User-Id': userId} : {};
-function renderAcct(){ const b=document.getElementById('acct'); if(b) b.textContent = userId ? ('Sign out · ' + userId) : 'Sign in'; }
-function toggleAcct(){
-  if(userId){ userId = null; localStorage.removeItem('df_user'); }
-  else { const id = prompt('Dev sign-in — enter a user id (e.g. alice):', 'alice'); if(id && id.trim()){ userId = id.trim(); localStorage.setItem('df_user', userId); } }
+const authHeaders = () => session ? {Authorization: 'Bearer ' + session.access_token} : {};
+const signedIn = () => !!session;
+function renderAcct(){
+  const b = document.getElementById('acct'); if(!b) return;
+  if(!sb){ b.textContent = 'Sign-in not configured'; b.disabled = true; return; }
+  b.disabled = false;
+  b.textContent = session ? ('Sign out · ' + (session.user.email || 'account')) : 'Sign in';
+}
+function onAuthChange(){
   renderAcct(); refreshWlCount();
   loaded.watchlist = false;
   if(state.mode === 'watchlist') loadWatchlist();
 }
+function openSignin(){
+  if(!sb) return;
+  document.getElementById('signin').hidden = false;
+  document.getElementById('signinAddr').focus();
+}
+async function toggleAcct(){
+  if(!sb) return;
+  if(session){ await sb.auth.signOut(); return; }
+  const panel = document.getElementById('signin');
+  if(panel.hidden) openSignin(); else panel.hidden = true;
+}
+const returnTo = () => location.origin + location.pathname;
+async function initAuth(){
+  let cfg = {};
+  try{ cfg = await (await fetch('/config.json')).json(); }catch(e){}
+  if(cfg.supabaseUrl && cfg.supabasePublishableKey && window.supabase){
+    sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabasePublishableKey);
+    session = (await sb.auth.getSession()).data.session;
+    sb.auth.onAuthStateChange((_event, s) => { session = s; onAuthChange(); });
+  }
+  document.getElementById('signinEmail').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const msg = document.getElementById('signinMsg');
+    const {error} = await sb.auth.signInWithOtp({email: document.getElementById('signinAddr').value.trim(),
+                                                  options: {emailRedirectTo: returnTo()}});
+    msg.textContent = error ? ('Could not send the link: ' + error.message) : 'Check your email for the sign-in link.';
+  });
+  document.querySelectorAll('#signin [data-provider]').forEach(b => b.addEventListener('click', () =>
+    sb.auth.signInWithOAuth({provider: b.dataset.provider, options: {redirectTo: returnTo()}})));
+  onAuthChange();
+}
 async function refreshWlCount(){
   const el = document.getElementById('wlCount');
-  if(!userId){ if(el) el.textContent=''; return; }
+  if(!signedIn()){ if(el) el.textContent=''; return; }
   try{ const d = await (await fetch('/watchlist', {headers: authHeaders()})).json(); if(el) el.textContent = d.count || ''; }catch(e){}
 }
 const loaded = {};
@@ -464,7 +527,7 @@ function cardHTML(r,i){
     <div class="priceblock">
       <div class="price">${money(r.price)}</div>
       <div style="display:flex;gap:var(--space-3);align-items:center;">
-        ${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
+        ${r.url?`<a class="link-sm" href="${safeHref(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}
         <button class="linkbtn watch-btn" data-idx="${i}">＋ watch</button>
       </div>
     </div>
@@ -472,11 +535,13 @@ function cardHTML(r,i){
 }
 async function addWatch(r, btn){
   if(!r) return;
-  if(!userId){ toggleAcct(); if(!userId) return; }
+  if(!signedIn()){ openSignin(); return; }
   try{
-    const body = {id:r.id, title:r.title, url:r.url, image_url:r.image_url, source:r.source, last_price:r.price, target_price:r.price};
+    // Only which offer and a target: the server fills in the title and price from its catalog.
+    const body = {offer_id:r.id, target_price:r.price};
     const res = await fetch('/watchlist', {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(body)});
     if(res.ok && btn){ btn.textContent='watching ✓'; btn.disabled=true; btn.style.color='var(--color-neutral-500)'; }
+    else if(btn){ btn.textContent = res.status === 404 ? 'search again to watch' : 'could not watch'; }
     refreshWlCount();
   }catch(e){}
 }
@@ -548,7 +613,7 @@ function semCard(r){
     <div class="card-body"><div class="card-head"><span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span></div>
       <div class="title">${esc(r.title)}</div></div>
     <div class="signal"><span class="sig-note accent">${esc(sim)}</span></div>
-    <div class="priceblock"><div class="price">${r.price!=null?money(r.price):''}</div>${r.url?`<a class="link-sm" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}</div>
+    <div class="priceblock"><div class="price">${r.price!=null?money(r.price):''}</div>${r.url?`<a class="link-sm" href="${safeHref(r.url)}" target="_blank" rel="noopener noreferrer">open offer →</a>`:''}</div>
   </div>`;
 }
 
@@ -618,7 +683,7 @@ function renderInspector(d){
 /* ── WATCHLIST (P1 consumer core) ─────────────────────────────────────── */
 async function loadWatchlist(){
   const body = $('#wlBody');
-  if(!userId){
+  if(!signedIn()){
     loaded.watchlist = false;
     body.innerHTML = '<div class="loading">Sign in to save items and get price-drop alerts — use the “Sign in” button, top-right.</div>';
     $('#wlCount').textContent = '';
@@ -649,16 +714,15 @@ function wlCard(it){
     <div class="priceblock">
       <div class="price">${it.last_price!=null?money(it.last_price):''}</div>
       <div style="display:flex;gap:var(--space-3);align-items:center;">
-        ${it.url?`<a class="link-sm" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">open →</a>`:''}
-        <button class="linkbtn wl-remove" data-id="${esc(it.id)}">remove</button>
+        ${it.url?`<a class="link-sm" href="${safeHref(it.url)}" target="_blank" rel="noopener noreferrer">open →</a>`:''}
+        <button class="linkbtn wl-remove" data-id="${esc(it.offer_id)}">remove</button>
       </div>
     </div>
   </div>`;
 }
 
 document.getElementById('acct').addEventListener('click', toggleAcct);
-renderAcct();
-refreshWlCount();
+initAuth();
 loadDeals();
 </script>
 </body>

@@ -13,17 +13,13 @@ from __future__ import annotations
 import re
 
 import numpy as np
-from fastembed import TextEmbedding
 
-_model: TextEmbedding | None = None
-_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+from . import embed
 
 
-def _get_model() -> TextEmbedding:
-    global _model
-    if _model is None:
-        _model = TextEmbedding(model_name=_EMBED_MODEL)
-    return _model
+def _get_model():
+    """The process's one embedding model, shared with `embed` (never a second copy)."""
+    return embed._get_model()
 
 
 def _embed(titles: list[str]) -> np.ndarray:
