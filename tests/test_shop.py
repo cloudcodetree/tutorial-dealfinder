@@ -118,3 +118,43 @@ def test_ebay_box_survives_an_ebay_error(monkeypatch):
     fake.search = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("eBay down"))
     monkeypatch.setattr(shop, "EBAY", fake)
     assert shop.ebay_box("x")["items"] == []
+
+
+@pytest.mark.parametrize("value", ["Live ", "verdicts", "on", ""])
+def test_unknown_mode_fails_closed(monkeypatch, value):
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", value)
+    assert shop.verdict_mode() == "check"
+
+
+def test_unset_mode_is_live(monkeypatch):
+    monkeypatch.delenv("DEALFINDER_VERDICT_MODE", raising=False)
+    assert shop.verdict_mode() == "live"
+
+
+@pytest.mark.parametrize("price, verdict", [(25.0, "suspicious"), (30.0, "suspicious"), (80.0, "deal"), (85.0, "deal"),
+                                            (90.0, "fair"), (114.0, "fair"), (115.0, "overpriced"), (120.0, "overpriced")])
+def test_check_rule(monkeypatch, price, verdict):
+    monkeypatch.setattr(shop, "_fair_for", lambda t: ("audio", 100.0))
+    assert shop.check_deal("Sony WH-1000XM5", price)["verdict"] == verdict
+
+
+def test_check_reason_copy_and_unknown_category(monkeypatch):
+    monkeypatch.setattr(shop, "_fair_for", lambda t: ("audio", 100.0))
+    assert shop.check_deal("Sony WH-1000XM5", 80.0)["reason"] == "20% below our fair price for this model (~$100)."
+    assert shop.check_deal("Sony WH-1000XM5", 25.0)["reason"] == (
+        "75% below our fair price for this model (~$100). That is too far below to be real. "
+        "It may be used, an accessory, or a mislisting.")
+    assert shop.check_deal("Sony WH-1000XM5", 120.0)["reason"] == "20% above our fair price for this model (~$100)."
+    assert shop.check_deal("Sony WH-1000XM5", 100.0)["reason"] == "Within 15% of our fair price for this model (~$100)."
+    assert shop.check_deal("Sony WH-1000XM5", 80.0)["basis"] == "model"
+    monkeypatch.setattr(shop, "_fair_for", lambda t: (None, None))
+    r = shop.check_deal("Mystery widget", 10.0)
+    assert (r["verdict"], r["basis"], r["reason"]) == (None, None, "We can't estimate a fair price for this kind of product yet.")
+
+
+def test_check_on_a_real_title(monkeypatch):
+    # Pinned from a real run of the snapshot model (2026-10-27):
+    # check_deal('Sony WH-1000XM5 Wireless Noise Canceling Headphones', 199.0)
+    monkeypatch.delenv("DEALFINDER_VERDICT_MODE", raising=False)
+    r = shop.check_deal("Sony WH-1000XM5 Wireless Noise Canceling Headphones", 199.0)
+    assert (r["category"], r["fair"], r["verdict"]) == ("audio", 285.15, "deal")

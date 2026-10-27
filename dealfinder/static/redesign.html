@@ -471,7 +471,7 @@ function tagFor(v){
 }
 function cardHTML(r,i){
   const pct = r.pct_under_median;
-  const under = pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
+  const under = pct==null ? 'not rated' : pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
   const thumb = r.image_url ? `<img class="thumb" src="${esc(r.image_url)}" alt="" referrerpolicy="no-referrer">` : `<div class="thumb"></div>`;
   const src = `<span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span>`;
   const est = r.basis==='peers';       // fair price estimated from peers, not a trained model

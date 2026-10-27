@@ -576,3 +576,43 @@ def test_anonymous_search_is_edge_cacheable_and_signed_in_is_private(monkeypatch
     assert client.get("/search", params={"q": "tv"}).headers["cache-control"] == "public, max-age=300"
     signed = client.get("/search", params={"q": "tv"}, headers=bearer(mint("u-1")))
     assert signed.headers["cache-control"] == "private, no-store"
+
+
+def test_check_mode_nulls_every_signal(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    embedded = []
+    bb = _bestbuy_rows()
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": list(bb), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(serve, "aggregate", lambda q: {"results": list(bb), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": False, "note": "n", "items": []})
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: embedded.extend(t) or [[1.0, 0.0] for _ in t])
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert body["mode"] == "check" and body["median_price"] is None and embedded == []
+    nulls = ("verdict", "fair", "residual_frac", "basis", "pct_under_median")
+    assert all(r[k] is None for r in body["results"] for k in nulls)
+    assert all(r["reason"] == "Ratings are off for store listings. Use Check a deal to rate a price you found."
+               for r in body["results"])
+    assert all(r["verdict"] is None for r in client.get("/ranked", params={"q": "headphones"}).json()["results"])
+    assert embedded == []
+
+
+def test_check_uses_no_live_source(monkeypatch):
+    monkeypatch.setattr(shop, "aggregate", lambda *a, **k: pytest.fail("no live search"))
+    monkeypatch.setattr(shop.EBAY, "search", lambda *a, **k: pytest.fail("no eBay"))
+    r = client.get("/check", params={"title": "Sony WH-1000XM5", "price": 199})
+    assert r.status_code == 200
+    assert set(r.json()) == {"title", "price", "category", "fair", "residual_frac", "verdict", "reason", "basis"}
+
+
+@pytest.mark.parametrize("params", [{"title": "ab", "price": 10}, {"title": "TV set", "price": 0},
+                                    {"title": "TV set", "price": -1}, {"title": "TV set", "price": 50001},
+                                    {"title": "   ab   ", "price": 10}, {"title": "x" * 201, "price": 10},
+                                    {"title": "TV set", "price": "nan"}])
+def test_check_validation(params):
+    assert client.get("/check", params=params).status_code == 422
+
+
+def test_check_works_in_check_mode(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    monkeypatch.setattr(shop, "_fair_for", lambda t: ("audio", 100.0))
+    assert client.get("/check", params={"title": "Sony WH-1000XM5", "price": 80}).json()["verdict"] == "deal"

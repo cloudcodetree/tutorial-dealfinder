@@ -7,6 +7,7 @@ estimate. `/ranked` (the lab) and, from Task 6, the shopper `/search` share it.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import statistics
@@ -23,6 +24,9 @@ from .aggregate import _utc_iso, aggregate
 from .live_sources import EBAY
 
 NOT_RATED_REASON = "Not rated: this store's terms don't allow price ratings."
+CHECK_MODE_REASON = "Ratings are off for store listings. Use Check a deal to rate a price you found."
+_MODES = ("live", "check")
+_warned_modes: set[str] = set()
 EBAY_NOTE = "Listings from eBay. Not compared or rated."
 # eBay's terms cap listing age at 6 hours (licensing.py); this box keeps its own
 # rows 15 minutes, and nothing else ever holds them.
@@ -34,6 +38,23 @@ _ebay_lock = threading.Lock()
 
 def _now() -> float:
     return time.monotonic()
+
+
+def verdict_mode() -> str:
+    """``live`` (verdicts on store listings) or ``check`` (only Check a deal rates).
+
+    Env DEALFINDER_VERDICT_MODE; unset means ``live``. Any other value fails
+    closed to ``check``, which shows no verdicts, and logs one warning."""
+    raw = os.getenv("DEALFINDER_VERDICT_MODE")
+    if raw is None:
+        return "live"
+    if raw in _MODES:
+        return raw
+    if raw not in _warned_modes:
+        _warned_modes.add(raw)
+        logging.getLogger("dealfinder").warning(
+            "DEALFINDER_VERDICT_MODE=%r is not live or check; showing no verdicts", raw)
+    return "check"
 
 
 def _embed_texts(texts):
@@ -138,6 +159,8 @@ def score_offers(offers: list[dict], median: float) -> list[dict]:
     from .schema import Product
 
     rows = [r for r in offers if licensing.may_comingle(r.get("source", ""))]
+    if verdict_mode() == "check":
+        return [_unrated(r, CHECK_MODE_REASON, guess_category(r["title"])) for r in rows]
     rated = [i for i, r in enumerate(rows) if licensing.may_verdict(r["source"])]
     peer_idx = [i for i in rated if licensing.may_embed(rows[i]["source"])]
     peers = peer_fair_prices([rows[i] for i in peer_idx])
@@ -167,22 +190,30 @@ def score_offers(offers: list[dict], median: float) -> list[dict]:
         else:
             reason = NOT_RATED_REASON
         scored.append({
-            "id": r["id"], "sku": r.get("sku"), "slug": offer_slug(r["title"], r.get("sku")),
-            "title": r["title"], "brand": r.get("brand"),
-            "price": round(price, 2), "regular_price": r.get("regular_price"),   # display only
-            "source": r.get("source"),
+            **_unrated(r, reason, cat),
             "verdict": verdict,
             "pct_under_median": pct,
             "fair": round(fair, 2) if fair is not None else None,
             "residual_frac": round(rf, 3) if rf is not None else None,
             "basis": basis,               # "model" | "peers" | None (value-only or not rated)
-            "category": cat,
-            "reason": reason,
-            "url": r.get("url"), "image_url": r.get("image_url"),
-            "fetched_at": r.get("fetched_at"),
         })
     scored.sort(key=_value, reverse=True)
     return scored
+
+
+def _unrated(r: dict, reason: str, category: str | None) -> dict:
+    """One result row in the contract shape with every price signal empty."""
+    return {
+        "id": r["id"], "sku": r.get("sku"), "slug": offer_slug(r["title"], r.get("sku")),
+        "title": r["title"], "brand": r.get("brand"),
+        "price": round(float(r["price"]), 2), "regular_price": r.get("regular_price"),   # display only
+        "source": r.get("source"),
+        "verdict": None, "pct_under_median": None, "fair": None, "residual_frac": None, "basis": None,
+        "category": category,
+        "reason": reason,
+        "url": r.get("url"), "image_url": r.get("image_url"),
+        "fetched_at": r.get("fetched_at"),
+    }
 
 
 def _ebay_enabled() -> bool:
@@ -233,6 +264,7 @@ def shop_search(q: str, k: int = 12) -> dict:
             ebay = box.result()
         except Exception:
             ebay = {"enabled": False, "note": EBAY_NOTE, "items": []}
+    mode = verdict_mode()
     offers = result.get("results", [])
     rated = [float(r["price"]) for r in offers if licensing.may_verdict(r.get("source", ""))]
     median = statistics.median(rated) if rated else 0.0
@@ -244,11 +276,58 @@ def shop_search(q: str, k: int = 12) -> dict:
             attribution.append(policy.attribution)
     return {
         "query": q,
-        "mode": "live",
+        "mode": mode,
         "count": len(results),
-        "median_price": round(median, 2),
+        "median_price": None if mode == "check" else round(median, 2),
         "fetched_at": _utc_iso(datetime.now(timezone.utc)),
         "results": results,
         "ebay": ebay,
         "attribution": attribution,
     }
+
+
+def _fair_for(title: str) -> tuple[str | None, float | None]:
+    """The title's category and the snapshot model's fair price for it.
+
+    The models are trained on the frozen teaching snapshot only, so this never
+    reads a live row and never calls the network."""
+    from .dealscore import fair_price
+    from .extract import guess_category
+    from .features import featurize
+    from .schema import Product
+
+    cat = guess_category(title)
+    model = _models().get(cat) if cat else None
+    if model is None:
+        return cat, None
+    p = Product(id="check", title=title, brand=None, category=cat, price=0.0, url="", source="check")
+    return cat, float(fair_price(model, featurize(p)))
+
+
+def check_deal(title: str, price: float) -> dict:
+    """Rate one price the shopper found against our fair price for that model.
+
+    There is no market median for a single price, so the verdict uses the model
+    residual alone, with the same thresholds as the two-signal verdict."""
+    from .dealscore import DEAL_MEDIAN_FRAC, SUSPICIOUS_RESIDUAL_FRAC, residual_fraction
+
+    cat, fair = _fair_for(title)
+    out = {"title": title, "price": price, "category": cat, "fair": None, "residual_frac": None,
+           "verdict": None, "basis": None,
+           "reason": "We can't estimate a fair price for this kind of product yet."}
+    if fair is None:
+        return out
+    rf = residual_fraction(price, fair)
+    n = round(abs(rf) * 100)
+    if rf >= SUSPICIOUS_RESIDUAL_FRAC:
+        verdict = "suspicious"
+        reason = (f"{n}% below our fair price for this model (~${fair:.0f}). That is too far below to be real. "
+                  "It may be used, an accessory, or a mislisting.")
+    elif rf >= DEAL_MEDIAN_FRAC:
+        verdict, reason = "deal", f"{n}% below our fair price for this model (~${fair:.0f})."
+    elif rf <= -DEAL_MEDIAN_FRAC:
+        verdict, reason = "overpriced", f"{n}% above our fair price for this model (~${fair:.0f})."
+    else:
+        verdict, reason = "fair", f"Within 15% of our fair price for this model (~${fair:.0f})."
+    return {**out, "fair": round(fair, 2), "residual_frac": round(rf, 3), "verdict": verdict,
+            "basis": "model", "reason": reason}

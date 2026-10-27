@@ -27,6 +27,10 @@ _KEYS = [
     "EBAY_APP_ID",
     "EBAY_CERT_ID",
     "EBAY_CAMPAIGN_ID",
+    # Behavior switches, not keys, but a value in .env would flip the same branches.
+    "DEALFINDER_SOURCES",
+    "DEALFINDER_VERDICT_MODE",
+    "DEALFINDER_EBAY_ALLOW_SANDBOX",
 ]
 
 

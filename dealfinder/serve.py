@@ -179,6 +179,19 @@ def search(q: SearchText, request: Request, response: Response, background: Back
     return result
 
 
+# A product name for Check a deal: 3-200 characters after trimming, no NUL byte.
+CheckTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200,
+                                              pattern=r"^[^\x00]+$")]
+
+
+@app.get("/check")
+def check(title: CheckTitle, price: Annotated[float, Query(gt=0, le=50_000, allow_inf_nan=False)]):
+    """Check a deal: rate one price the shopper found for a product, using the
+    price model trained on the teaching snapshot. No live store is called, so it
+    works in both verdict modes."""
+    return shop.check_deal(title, price)
+
+
 @app.get("/ranked")
 def ranked(q: str, background: BackgroundTasks, k: int = 12,
            who: Principal = Depends(current_principal)):
@@ -257,6 +270,8 @@ def _remember_offers(results: list[dict], tenant: str) -> None:
         # Embed only the rows the license allows; the titles were just embedded
         # while scoring, so these are cache hits.
         embeddable = [i for i, r in enumerate(results) if licensing.may_embed(r.get("source", ""))]
+        if shop.verdict_mode() == "check":   # check mode embeds nothing
+            embeddable = []
         embs = None
         if embeddable:
             vecs = shop._embed_texts([results[i]["title"] for i in embeddable])
