@@ -6,6 +6,7 @@ discussed in the tutorial; this is the shape they hang off.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import math
@@ -23,7 +24,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, licensing, migrate, pgstore, shop
+from . import db, licensing, migrate, pgstore, ratelimit, shop
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -36,6 +37,38 @@ from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
 
 app = FastAPI(title="DealFinder")
+
+# Per-instance limits for the anonymous routes (ratelimit.LIMITS). Module-level so
+# tests can swap in a fresh one.
+_limiter = ratelimit.Limiter()
+_EDGE_EXEMPT = ("/healthz", "/readyz")
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if ratelimit.enabled():
+        wait = _limiter.check(request.url.path, ratelimit.client_key(request))
+        if wait is not None:
+            return JSONResponse({"detail": "slow down"}, status_code=429,
+                                headers={"Retry-After": str(max(1, math.ceil(wait)))})
+    return await call_next(request)
+
+
+# Registered last, so it runs first: nothing is counted or served for a request
+# that skipped the Worker.
+@app.middleware("http")
+async def edge_guard(request: Request, call_next):
+    """With EDGE_SHARED_SECRET set, only the deals Worker may call the service.
+
+    Cloud Run's run.app URL is public (the Worker cannot mint Google ID tokens
+    cheaply), so this header is the access control that keeps visitors from
+    skipping the edge cache and rate limits. Health checks stay open."""
+    secret = os.getenv("EDGE_SHARED_SECRET")
+    if secret and request.url.path not in _EDGE_EXEMPT:
+        got = request.headers.get("x-dealfinder-edge", "")
+        if not hmac.compare_digest(got.encode(), secret.encode()):
+            return JSONResponse({"detail": "direct access not allowed"}, status_code=403)
+    return await call_next(request)
 
 
 def _json_safe(value):
