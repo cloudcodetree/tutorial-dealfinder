@@ -529,6 +529,7 @@ def _bestbuy_rows():
 
 
 def _stub_search(monkeypatch, results, ebay_items=()):
+    monkeypatch.setattr(serve, "_DB", False)   # nothing reaches a real database
     monkeypatch.setattr(shop, "aggregate", lambda q: {"results": list(results), "sources_live": ["BestBuy"]})
     monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": bool(ebay_items), "note": "n",
                                                                "items": list(ebay_items)})
@@ -586,6 +587,8 @@ def test_check_mode_nulls_every_signal(monkeypatch):
     monkeypatch.setattr(serve, "aggregate", lambda q: {"results": list(bb), "sources_live": ["BestBuy"]})
     monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": False, "note": "n", "items": []})
     monkeypatch.setattr(shop, "_embed_texts", lambda t: embedded.extend(t) or [[1.0, 0.0] for _ in t])
+    monkeypatch.setattr(serve, "_DB", True)   # run the remember step too, against a stub store
+    monkeypatch.setattr(pgstore, "upsert", lambda *a, **k: 0)
     body = client.get("/search", params={"q": "headphones"}).json()
     assert body["mode"] == "check" and body["median_price"] is None and embedded == []
     nulls = ("verdict", "fair", "residual_frac", "basis", "pct_under_median")
