@@ -23,7 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, migrate, pgstore
+from . import db, licensing, migrate, pgstore, shop
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -179,53 +179,6 @@ def search(q: str, who: Principal = Depends(current_principal)):
     return result
 
 
-def _peer_fair_prices(offers: list[dict]) -> dict[int, float]:
-    """Category-agnostic fallback fair price: each offer's fair price is the median
-    price of its k nearest SEMANTIC neighbors within this result set.
-
-    Embed every offer's title once, then for offer i take the median price of its
-    most-similar peers. This gives a second signal for ANY search (not just the
-    electronics the trained models cover): an item far cheaper than its close peers
-    is suspicious, while one cheap-but-consistent-with-its-peers is a genuine deal.
-    It's the graceful-degradation layer under the trained per-category model.
-    Returns {index: peer_fair}; offers with too few neighbors are omitted."""
-    if len(offers) < 3:
-        return {}
-    try:
-        import numpy as np
-
-        embs = np.asarray(_embed_texts([o["title"] for o in offers]), dtype=float)
-        embs /= np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9
-        sims = embs @ embs.T
-        prices = np.array([float(o["price"]) for o in offers])
-        out: dict[int, float] = {}
-        for i in range(len(offers)):
-            nbrs = [j for j in np.argsort(-sims[i]) if j != i][:5]
-            if len(nbrs) >= 2:
-                out[i] = float(np.median(prices[nbrs]))
-        return out
-    except Exception:
-        return {}
-
-
-def _deal_reason(verdict, m, rf, fair, basis) -> str:
-    """The human-readable 'why' for a verdict — domain copy lives here (backend),
-    not in the page, so the UI only displays it."""
-    if verdict is None:
-        return "Ranked by value only — too few similar offers to estimate a fair price."
-    pct = round(m * 100)
-    src = "the price model" if basis == "model" else "similar offers"
-    ref = f"~${fair:.0f}" if fair else "the estimate"
-    if verdict == "deal":
-        return f"{pct}% under the median and consistent with {src} ({ref}) — a genuine deal."
-    if verdict == "suspicious":
-        return (f"Looks {pct}% under the median, but far below {src} ({ref}) — "
-                "too good to be true (likely an accessory or a mislisting).")
-    if verdict == "overpriced":
-        return f"Above the market median and above {src} ({ref})."
-    return f"Near the market median and {src} ({ref})."
-
-
 @app.get("/ranked")
 def ranked(q: str, background: BackgroundTasks, k: int = 12,
            who: Principal = Depends(current_principal)):
@@ -242,61 +195,13 @@ def ranked(q: str, background: BackgroundTasks, k: int = 12,
          (guitars, cookware, …) still gets a real second signal;
       3. value-only (`verdict=null`) only when there are too few offers to compare.
     Ranked by value, with too-good-to-be-true (suspicious) and overpriced demoted."""
-    from .dealscore import (
-        SUSPICIOUS_RESIDUAL_FRAC,
-        median_signal,
-        render_badge,
-        residual_fraction,
-    )
-    from .extract import guess_category
-    from .features import featurize
-    from .schema import Product
+    from .dealscore import SUSPICIOUS_RESIDUAL_FRAC
 
     result = aggregate(q)
     offers = result.get("results", [])
-    median = result.get("median_price") or 0.0
-    peer_fair = _peer_fair_prices(offers)
-
-    scored = []
-    for i, r in enumerate(offers):
-        price = float(r["price"])
-        m = median_signal(price, median) if median else 0.0
-        cat = guess_category(r["title"])
-        model = _cat_models.get(cat) if cat else None
-        fair = basis = None
-        if model is not None:
-            p = Product(id=r["id"], title=r["title"], brand=r.get("brand"),
-                        category=cat, price=price, url=r.get("url") or "",
-                        source=r.get("source") or "live")
-            fair, basis = float(fair_price(model, featurize(p))), "model"
-        elif i in peer_fair and peer_fair[i] > 0:
-            fair, basis = peer_fair[i], "peers"
-        verdict = rf = None
-        if fair is not None:
-            rf = residual_fraction(price, fair)
-            verdict = render_badge(m, rf).lower()   # deal / suspicious / fair / overpriced
-        scored.append({
-            "id": r["id"], "title": r["title"], "brand": r.get("brand"),
-            "price": round(price, 2), "source": r.get("source"),
-            "verdict": verdict,
-            "pct_under_median": round(m * 100, 1),
-            "fair": round(fair, 2) if fair is not None else None,
-            "residual_frac": round(rf, 3) if rf is not None else None,
-            "basis": basis,               # "model" | "peers" | None (value-only)
-            "category": cat,
-            "reason": _deal_reason(verdict, m, rf, fair, basis),
-            "url": r.get("url"), "image_url": r.get("image_url"),
-        })
-
-    def _value(x):
-        s = (x["pct_under_median"] or 0) / 100.0
-        if x["verdict"] == "suspicious":
-            return s - 1.0        # too-good-to-be-true sinks below genuine deals
-        if x["verdict"] == "overpriced":
-            return s - 0.5
-        return s
-    scored.sort(key=_value, reverse=True)
-    scored = scored[:k]
+    rated = [float(r["price"]) for r in offers if licensing.may_verdict(r.get("source", ""))]
+    median = statistics.median(rated) if rated else 0.0
+    scored = shop.score_offers(offers, median)[:k]
     background.add_task(_remember_offers, scored, who.tenant_id)   # after the response: a shown deal can be watched
     return {
         "query": q,
@@ -349,7 +254,16 @@ def _remember_offers(results: list[dict], tenant: str) -> None:
     if not _DB or not results:
         return
     try:
-        pgstore.upsert(results, None, tenant=tenant)
+        # Embed only the rows the license allows; the titles were just embedded
+        # while scoring, so these are cache hits.
+        embeddable = [i for i, r in enumerate(results) if licensing.may_embed(r.get("source", ""))]
+        embs = None
+        if embeddable:
+            vecs = shop._embed_texts([results[i]["title"] for i in embeddable])
+            embs = [None] * len(results)
+            for i, v in zip(embeddable, vecs):
+                embs[i] = v
+        pgstore.upsert(results, embs, tenant=tenant)
     except Exception:
         logging.getLogger("dealfinder").warning("could not remember %d offers", len(results), exc_info=True)
 
@@ -499,7 +413,7 @@ def semantic(q: str, k: int = 12, who: Principal = Depends(current_principal)):
     offline, the same way ``/ask`` does. Each result carries its two-signal deal
     verdict so the UI can badge DEAL/SUSPICIOUS."""
     if _DB:
-        rows = pgstore.semantic_search(_embed_texts([q])[0], k=k, tenant=who.tenant_id)
+        rows = pgstore.semantic_search(shop._embed_texts([q])[0], k=k, tenant=who.tenant_id)
         for r in rows:
             r["similarity"] = round(float(r["similarity"]), 3)
         return {"query": q, "count": len(rows), "results": rows,

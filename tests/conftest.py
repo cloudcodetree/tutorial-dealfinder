@@ -96,23 +96,30 @@ def mint(_es256_key, monkeypatch):
 
 @pytest.fixture
 def stub_sources(monkeypatch):
-    """Keep /ranked off the network: canned offers and deterministic embeddings."""
-    from dealfinder import serve
+    """Keep /ranked off the network: canned Best Buy offers and deterministic embeddings."""
+    from dealfinder import serve, shop
 
     fake = {
         "query": "x", "sources_live": ["Stub"], "throttled": [], "median_price": 60.0, "count": 3,
         "results": [
             {"id": "h1", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
-             "price": 50.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 16.7},
+             "price": 50.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 16.7},
             {"id": "h2", "title": "Anker Soundcore Q20i Headphones", "brand": "Anker",
-             "price": 60.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 0.0},
+             "price": 60.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 0.0},
             {"id": "h3", "title": "Bose QuietComfort 45 Headphones", "brand": "Bose",
-             "price": 70.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": -16.7},
+             "price": 70.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": -16.7},
         ],
     }
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
-    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
+    monkeypatch.setattr(shop, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
     return fake
+
+
+def row(id, title, price, source, **kw):
+    """One aggregate result dict, as dealfinder.aggregate returns it."""
+    return {"id": id, "title": title, "brand": None, "price": price, "source": source, "url": "",
+            "image_url": None, "sku": None, "regular_price": None,
+            "fetched_at": "2026-10-26T12:00:00Z", **kw}
 
 
 _OFFER_IDS = ("off-1", "off-2", "acme-1", "bestbuy-77", "ebay-legacy")

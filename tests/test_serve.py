@@ -77,44 +77,30 @@ def test_semantic_offline_fallback_returns_verdicts(monkeypatch):
         assert bose["verdict"] == "suspicious"
 
 
-def test_peer_fair_prices_flags_the_within_cluster_outlier(monkeypatch):
-    # The category-agnostic fallback: an offer's fair price is the median of its
-    # nearest semantic neighbors in the result set. With identical embeddings every
-    # offer's peers are the others, so the cheap outlier's fair price is the median
-    # of the rest — far above it. Mock embeddings → hermetic, no model needed.
-    import dealfinder.serve as serve
-
-    offers = [{"title": f"acoustic guitar {i}", "price": p}
-              for i, p in enumerate([60.0, 65.0, 70.0, 75.0, 80.0])]
-    offers.append({"title": "acoustic guitar cheap", "price": 8.0})
-    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
-    pf = serve._peer_fair_prices(offers)
-    assert pf[5] >= 60.0          # the $8 outlier's peer fair is the median of the rest
-
-
 def test_ranked_scores_any_search_via_the_layered_estimator(monkeypatch):
     # /ranked works for ANY search: trained model where a category has one
     # (electronics), a peer estimate otherwise (guitars) — so every offer still
     # gets a real second signal. Mock aggregate() + embeddings for determinism.
     import dealfinder.serve as serve
+    from dealfinder import shop
 
     fake = {
-        "query": "x", "sources_live": ["eBay"], "throttled": [], "median_price": 60.0, "count": 5,
+        "query": "x", "sources_live": ["BestBuy"], "throttled": [], "median_price": 60.0, "count": 5,
         "results": [
             {"id": "h", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
-             "price": 50.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 16.7},
+             "price": 50.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 16.7},
             {"id": "g1", "title": "41-Inch Acoustic Guitar", "brand": None, "price": 60.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 0.0},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 0.0},
             {"id": "g2", "title": "Full-Size Acoustic Guitar", "brand": None, "price": 70.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": -16.7},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": -16.7},
             {"id": "g3", "title": "Dreadnought Acoustic Guitar", "brand": None, "price": 65.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 8.3},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 8.3},
             {"id": "g4", "title": "Acoustic Guitar Bundle", "brand": None, "price": 8.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 86.7},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 86.7},
         ],
     }
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
-    monkeypatch.setattr(serve, "_embed_texts",
+    monkeypatch.setattr(shop, "_embed_texts",
                         lambda titles: [[0.0, 1.0] if "Headphones" in t else [1.0, 0.0] for t in titles])
     body = client.get("/ranked", params={"q": "anything", "k": 8}).json()
 
@@ -416,7 +402,8 @@ def test_ranked_remembers_shown_offers(monkeypatch, stub_sources, with_db):
     body = client.get("/ranked", params={"q": "headphones", "k": 2}).json()
     assert len(calls) == 1
     rows, embs, tenant = calls[0]
-    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and embs is None and tenant == "public"
+    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and tenant == "public"
+    assert len(embs) == len(rows) and all(e is not None for e in embs)   # Best Buy rows may be embedded
 
 
 def test_remembering_offers_never_breaks_ranked(monkeypatch, stub_sources, with_db):

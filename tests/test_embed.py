@@ -13,6 +13,8 @@ Both tests mock fastembed, so they never touch the network.
 import threading
 import time
 
+import pytest
+
 import dealfinder.embed as embed
 from dealfinder import dedup
 
@@ -81,3 +83,34 @@ def test_one_embedding_model_per_process(monkeypatch):
     embed._get_model()
     dedup._embed(["a", "b"])
     assert len(made) == 1
+
+
+class _CountingModel:
+    """A stand-in for the fastembed model that records every text it embeds."""
+
+    def __init__(self, seen):
+        self.seen = seen
+
+    def embed(self, texts):
+        for t in texts:
+            self.seen.append(t)
+            yield [float(len(t)), 1.0]
+
+
+@pytest.fixture
+def fresh_embed_cache():
+    embed._embed_cache.clear()
+    yield
+    embed._embed_cache.clear()
+
+
+def test_embed_texts_cached_embeds_each_text_once(monkeypatch, fresh_embed_cache):
+    seen = []
+    monkeypatch.setattr(embed, "_get_model", lambda: _CountingModel(seen))
+    start = embed._now()
+    embed.embed_texts_cached(["a", "b"])
+    embed.embed_texts_cached(["b", "c"])
+    assert seen == ["a", "b", "c"]
+    monkeypatch.setattr(embed, "_now", lambda: start + embed.EMBED_CACHE_TTL_S + 1)
+    embed.embed_texts_cached(["a"])
+    assert seen[-1] == "a"
