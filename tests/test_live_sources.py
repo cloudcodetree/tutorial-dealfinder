@@ -175,9 +175,20 @@ def test_lookup_skus_rejects_non_digit_skus(monkeypatch):
         BestBuySource().lookup_skus(["123)&apiKey=x"])
 
 
-def test_lookup_skus_without_a_key_is_empty(monkeypatch):
+def test_lookup_skus_without_a_key_is_a_failure_not_gone(monkeypatch):
+    # A missing secret in a re-price job must never read as "every SKU is gone".
     monkeypatch.delenv("BESTBUY_API_KEY", raising=False)
-    assert BestBuySource().lookup_skus(["1"]) == {}
+    with pytest.raises(RuntimeError, match="bestbuy lookup failed: no key"):
+        BestBuySource().lookup_skus(["1"])
+    assert BestBuySource().lookup_skus([]) == {}
+
+
+@respx.mock
+def test_lookup_skus_network_error_is_a_failure_not_gone(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(side_effect=httpx.ConnectError("down"))
+    with pytest.raises(RuntimeError, match="bestbuy lookup failed"):
+        BestBuySource().lookup_skus(["1"])
 
 
 @respx.mock
@@ -186,3 +197,18 @@ def test_lookup_skus_failure_is_not_gone(monkeypatch):
     respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(return_value=httpx.Response(500))
     with pytest.raises(RuntimeError, match="bestbuy lookup failed: 500"):
         BestBuySource().lookup_skus(["1"])
+
+
+def test_production_requires_an_explicit_source_list(monkeypatch):
+    # A lost DEALFINDER_SOURCES must not switch on the course sources in production.
+    monkeypatch.setenv("DEALFINDER_ENV", "production")
+    monkeypatch.delenv("DEALFINDER_SOURCES", raising=False)
+    with pytest.raises(ValueError, match="DEALFINDER_SOURCES must be set in production"):
+        live_sources.enabled_sources()
+
+
+def test_production_refuses_a_course_only_source(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_ENV", "production")
+    with pytest.raises(ValueError, match="not a launch source: Shopify"):
+        live_sources.enabled_sources("BestBuy,Shopify")
+    assert [s.name for s in live_sources.enabled_sources("BestBuy")] == ["BestBuy"]

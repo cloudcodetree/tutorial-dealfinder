@@ -556,7 +556,9 @@ def test_ebay_never_reaches_results_median_peers_or_db(monkeypatch):
 def test_search_response_matches_the_contract(monkeypatch):
     _stub_search(monkeypatch, _bestbuy_rows())
     body = client.get("/search", params={"q": "headphones"}).json()
-    assert set(body) == {"query", "mode", "count", "median_price", "fetched_at", "results", "ebay", "attribution"}
+    assert set(body) == {"query", "mode", "count", "median_price", "fetched_at", "results", "ebay", "attribution",
+                         "degraded"}
+    assert body["degraded"] is False
     assert {"id", "sku", "slug", "title", "brand", "source", "price", "regular_price", "url", "image_url",
             "verdict", "pct_under_median", "fair", "residual_frac", "basis", "reason"} <= set(body["results"][0])
     assert body["attribution"] == [licensing.POLICIES["BestBuy"].attribution]
@@ -619,3 +621,21 @@ def test_check_works_in_check_mode(monkeypatch):
     monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
     monkeypatch.setattr(shop, "_fair_for", lambda t: ("audio", 100.0))
     assert client.get("/check", params={"title": "Sony WH-1000XM5", "price": 80}).json()["verdict"] == "deal"
+
+
+@pytest.mark.parametrize("trouble", [{"timed_out": ["BestBuy"], "throttled": ["BestBuy"]},
+                                     {"throttled": ["BestBuy"]}, {"benched": ["BestBuy"]}])
+def test_degraded_search_is_not_edge_cached(monkeypatch, trouble):
+    _stub_search(monkeypatch, [])
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": [], "sources_live": [], **trouble})
+    r = client.get("/search", params={"q": "tv"})
+    assert r.json()["degraded"] is True and r.headers["cache-control"] == "no-store"
+
+
+def test_ranked_carries_attribution_and_follows_check_mode(monkeypatch, stub_sources):
+    body = client.get("/ranked", params={"q": "headphones"}).json()
+    assert body["attribution"] == [licensing.POLICIES["BestBuy"].attribution]
+    assert isinstance(body["median_price"], float)
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    body = client.get("/ranked", params={"q": "headphones"}).json()
+    assert body["median_price"] is None and all(r["verdict"] is None for r in body["results"])

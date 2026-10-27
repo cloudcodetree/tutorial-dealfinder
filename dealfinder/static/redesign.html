@@ -453,7 +453,7 @@ async function loadDeals(){
     const d = await (await fetch(`/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
     rankedThr = d.residual_threshold ?? rankedThr;
     $('#dealsCount').textContent = d.count;
-    $('#meta').innerHTML = `<span class="mono">${d.count} offers · median ${money(d.median_price)} · two-signal ranked</span>`;
+    $('#meta').innerHTML = `<span class="mono">${d.count} offers · ${d.median_price==null ? 'ratings off' : 'median '+money(d.median_price)} · two-signal ranked</span>`;
     lastResults = d.results;
     const held = d.results.filter(r=>r.verdict==='suspicious').length;
     $('#results').innerHTML = d.results.map(cardHTML).join('') +

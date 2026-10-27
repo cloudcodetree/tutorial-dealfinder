@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 
 from . import licensing
-from .aggregate import _utc_iso, aggregate
+from .aggregate import SOURCE_TIMEOUT_S, _utc_iso, aggregate
 from .live_sources import EBAY
 
 NOT_RATED_REASON = "Not rated: this store's terms don't allow price ratings."
@@ -31,8 +31,9 @@ EBAY_NOTE = "Listings from eBay. Not compared or rated."
 # eBay's terms cap listing age at 6 hours (licensing.py); this box keeps its own
 # rows 15 minutes, and nothing else ever holds them.
 EBAY_CACHE_TTL_S = 900
+EBAY_FAILURE_TTL_S = 60  # an eBay outage costs one call a minute, not one per search
 _EBAY_CACHE_MAX = 256
-_ebay_cache: OrderedDict[str, tuple[float, list[dict]]] = OrderedDict()
+_ebay_cache: OrderedDict[str, tuple[float, list[dict], float]] = OrderedDict()  # key → (at, items, ttl)
 _ebay_lock = threading.Lock()
 
 
@@ -234,46 +235,62 @@ def ebay_box(q: str, limit: int = 6) -> dict:
     now = _now()
     with _ebay_lock:
         hit = _ebay_cache.get(key)
-        if hit and now - hit[0] < EBAY_CACHE_TTL_S:
+        if hit and now - hit[0] < hit[2]:
             _ebay_cache.move_to_end(key)
             return {"enabled": True, "note": EBAY_NOTE, "items": hit[1][:limit]}
+    ttl = EBAY_CACHE_TTL_S
     try:
         items = [{
             "id": p.id, "title": p.title, "price": p.price, "currency": p.currency, "url": p.url,
             "condition": p.source.split(":", 1)[1] if ":" in p.source else "", "image_url": p.image_url,
         } for p in EBAY.search(q.strip(), limit=limit)[:limit]]
     except Exception:
-        return {"enabled": True, "note": EBAY_NOTE, "items": []}
+        items, ttl = [], EBAY_FAILURE_TTL_S
     with _ebay_lock:
-        _ebay_cache[key] = (now, items)
+        _ebay_cache[key] = (now, items, ttl)
         _ebay_cache.move_to_end(key)
         while len(_ebay_cache) > _EBAY_CACHE_MAX:
             _ebay_cache.popitem(last=False)
     return {"enabled": True, "note": EBAY_NOTE, "items": items}
 
 
+def attribution_for(rows: list[dict]) -> list[dict]:
+    """The attribution every store in `rows` requires, once each, in first-seen order.
+
+    Best Buy's terms require its attribution on every page and screen that uses
+    its data, so every response that carries its rows carries this list."""
+    out: list[dict] = []
+    for r in rows:
+        policy = licensing.policy_for(r.get("source", ""))
+        if policy and policy.attribution and policy.attribution not in out:
+            out.append(policy.attribution)
+    return out
+
+
 def shop_search(q: str, k: int = 12) -> dict:
     """The shopper search: rated store results, the separate eBay box, attribution.
 
-    The live sources and the eBay box are fetched at the same time."""
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    The live sources and the eBay box are fetched at the same time. The box gets
+    the same deadline as a store, so a slow eBay never holds the search; a late
+    answer still lands in the box's cache for the next search."""
+    deadline = time.monotonic() + SOURCE_TIMEOUT_S
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
         live = pool.submit(aggregate, q)
         box = pool.submit(ebay_box, q)
         result = live.result()
         try:
-            ebay = box.result()
+            ebay = box.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception:
-            ebay = {"enabled": False, "note": EBAY_NOTE, "items": []}
+            ebay = {"enabled": _ebay_enabled(), "note": EBAY_NOTE, "items": []}
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     mode = verdict_mode()
     offers = result.get("results", [])
     rated = [float(r["price"]) for r in offers if licensing.may_verdict(r.get("source", ""))]
     median = statistics.median(rated) if rated else 0.0
     results = score_offers(offers, median)[:k]
-    attribution = []
-    for r in results:
-        policy = licensing.policy_for(r["source"])
-        if policy and policy.attribution and policy.attribution not in attribution:
-            attribution.append(policy.attribution)
+    attribution = attribution_for(results)
     return {
         "query": q,
         "mode": mode,
@@ -283,6 +300,8 @@ def shop_search(q: str, k: int = 12) -> dict:
         "results": results,
         "ebay": ebay,
         "attribution": attribution,
+        # A store timed out, failed or is cooling down: the results may be incomplete.
+        "degraded": bool(result.get("timed_out") or result.get("throttled") or result.get("benched")),
     }
 
 

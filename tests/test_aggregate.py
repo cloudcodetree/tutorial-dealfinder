@@ -154,3 +154,12 @@ def test_results_carry_provenance_fields():
                 category="c", price=15.0, url="", source="BestBuy:sale")
     r = aggregate("w", sources=[_Stub("BestBuy", [p], tier=1)])["results"][0]
     assert (r["sku"], r["regular_price"]) == ("1", 20.0) and r["fetched_at"].endswith("Z")
+
+
+def test_benched_sources_are_reported():
+    # A source skipped because it is cooling down must show up, so callers can
+    # tell "no results" from "a store did not answer".
+    a = _Stub("A", [_p("a1", "Alpha", 10, "A")], tier=1)
+    agg._bench("A")
+    out = aggregate("w", sources=[a])
+    assert out["count"] == 0 and out["benched"] == ["A"] and a.calls == 0

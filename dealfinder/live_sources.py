@@ -312,24 +312,30 @@ class BestBuySource:
     def lookup_skus(self, skus: list[str]) -> dict[str, Product]:
         """Current price and title for known SKUs, keyed by SKU.
 
-        A SKU missing from the answer is gone from Best Buy. A failed batch raises
+        A SKU missing from the answer is gone from Best Buy. Anything that stops
+        the lookup (no key, a network error, a non-200 batch) raises
         RuntimeError, so callers can tell "gone" from "failed" (a failed lookup
         must never refresh a row's freshness)."""
         wanted = list(dict.fromkeys(str(s) for s in skus))
         bad = [s for s in wanted if not re.fullmatch(r"\d{1,12}", s)]
         if bad:
             raise ValueError(f"not a Best Buy SKU: {bad[0]!r}")
-        key = os.getenv("BESTBUY_API_KEY")
-        if not key or not wanted:
+        if not wanted:
             return {}
+        key = os.getenv("BESTBUY_API_KEY")
+        if not key:
+            raise RuntimeError("bestbuy lookup failed: no key")
         show = "sku,name,salePrice,regularPrice,url,image,manufacturer"
         found: dict[str, Product] = {}
         for i in range(0, len(wanted), 100):
             if i:
                 time.sleep(0.2)  # Best Buy allows 5 requests per second
             batch = ",".join(wanted[i:i + 100])
-            r = httpx.get(f"https://api.bestbuy.com/v1/products(sku in({batch}))?apiKey={key}"
-                          f"&format=json&show={show}&pageSize=100", timeout=20)
+            try:
+                r = httpx.get(f"https://api.bestbuy.com/v1/products(sku in({batch}))?apiKey={key}"
+                              f"&format=json&show={show}&pageSize=100", timeout=20)
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"bestbuy lookup failed: {type(exc).__name__}") from None
             if r.status_code != 200:
                 raise RuntimeError(f"bestbuy lookup failed: {r.status_code}")
             for p in r.json().get("products", []):
@@ -452,11 +458,18 @@ def enabled_sources(names: str | None = None) -> list:
     """The live sources to search, from ``names`` or env DEALFINDER_SOURCES.
 
     Unset or empty means every course source. Otherwise a comma list, matched
-    case-insensitively and returned in LIVE_SOURCES order. Production runs
-    ``DEALFINDER_SOURCES=BestBuy``."""
+    case-insensitively and returned in LIVE_SOURCES order. Production
+    (``DEALFINDER_ENV=production``) runs ``DEALFINDER_SOURCES=BestBuy`` and fails
+    closed: an empty list or a course-only source raises instead of serving rows
+    the store terms don't cover."""
+    from .licensing import policy_for
+
+    production = os.getenv("DEALFINDER_ENV") == "production"
     raw = os.getenv("DEALFINDER_SOURCES", "") if names is None else names
     asked = [n.strip() for n in raw.split(",") if n.strip()]
     if not asked:
+        if production:
+            raise ValueError("DEALFINDER_SOURCES must be set in production")
         return list(LIVE_SOURCES)
     known = {s.name.lower() for s in LIVE_SOURCES}
     for name in asked:
@@ -465,4 +478,10 @@ def enabled_sources(names: str | None = None) -> list:
         if name.lower() not in known:
             raise ValueError(f"unknown source: {name}")
     wanted = {n.lower() for n in asked}
-    return [s for s in LIVE_SOURCES if s.name.lower() in wanted]
+    chosen = [s for s in LIVE_SOURCES if s.name.lower() in wanted]
+    if production:
+        for src in chosen:
+            policy = policy_for(src.name)
+            if not (policy and policy.launch):
+                raise ValueError(f"not a launch source: {src.name}")
+    return chosen

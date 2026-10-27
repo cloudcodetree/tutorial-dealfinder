@@ -869,7 +869,7 @@ async function run(q) {
     });
     es.addEventListener("done", (e) => {
       const d = JSON.parse(e.data);
-      $("meta").textContent = `${n} offers streamed · sources: ${srcs.join(", ") || "none"} · median ${fmt(d.median_price)}`;
+      $("meta").textContent = `${n} offers streamed · sources: ${srcs.join(", ") || "none"} · ${d.median_price == null ? "ratings off" : "median " + fmt(d.median_price)}`;
       if (!n) $("grid").innerHTML = `<div class="empty">No results.</div>`;
       es.close(); $("go").disabled = false;
     });

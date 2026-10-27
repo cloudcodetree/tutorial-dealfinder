@@ -1,15 +1,16 @@
 """Delete licensed rows before their store's age limit, and unstorable rows at once.
 
 Best Buy allows its data to be cached for at most 72 hours (licensing.py). The
-scheduled `dealfinder-pages` job runs this every 12 hours, so a row must go once
-it is older than ``max_age_s - RETENTION_MARGIN_S``: a row fetched just after one
-run is still gone before 72 hours by the next. For Best Buy that cut-off is 59
-hours. A row whose source has no policy, or may not be stored, goes at any age.
+scheduled `dealfinder-pages` job runs this every 12 hours, so a row goes once it
+is older than ``max_age_s - RETENTION_MARGIN_S``. The margin covers two run
+intervals plus an hour, so a Best Buy row is gone before 72 hours even when one
+run fails: 47 h + 2 × 12 h = 71 h. For Best Buy the cut-off is 47 hours. A row
+whose source has no policy, or may not be stored, goes at any age.
 
 Watchlist rows go by the same rule, keyed on ``last_checked_at``: a watched
 item's title and price are the store's content too. The daily re-price job
 refreshes ``last_checked_at`` only after a successful lookup, so a watch expires
-only when the store dropped the SKU or lookups kept failing for over two days.
+when the store dropped the SKU or about two days of lookups failed.
 
 Runs as one `db.job_scope` transaction: ``python -m dealfinder.retention``.
 """
@@ -22,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from . import db
 from .licensing import POLICIES
 
-RETENTION_MARGIN_S = 13 * 3600
+RETENTION_MARGIN_S = 25 * 3600  # 2 × 12 h purge interval + 1 h
 
 _PURGE = """
     DELETE FROM dealfinder.{table} t

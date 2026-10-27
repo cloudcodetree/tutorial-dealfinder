@@ -150,14 +150,15 @@ re-evaluated.
 `watchlist` row (by `last_checked_at`) past its store's age limit, plus every row
 whose store has no policy or may not be stored (eBay, unknown sources) at any
 age. It prints one JSON line, `{"offers": n, "watchlist": n}`, and exits 1 on a
-database error. **Why 59 hours:** Best Buy allows its data to be kept at most 72
+database error. **Why 47 hours:** Best Buy allows its data to be kept at most 72
 hours, and the scheduled job runs every 12 hours. Deleting at
-`72 h − 13 h = 59 h` means a row fetched just after one run is still gone before
-72 hours by the next run (`RETENTION_MARGIN_S` in `dealfinder/retention.py`). A
-watch whose item stopped refreshing is deleted too: its title and price are Best
-Buy content. **If it fails:** run it by hand with the job's `DATABASE_URL`, read
-the error line, fix the database, and run it again. A missed run is not safe to
-ignore: two missed runs leave Best Buy rows past 72 hours.
+`72 h − 25 h = 47 h` means a row is gone before 72 hours even when one run fails:
+the next run deletes it by `47 h + 2 × 12 h = 71 h` (`RETENTION_MARGIN_S` in
+`dealfinder/retention.py`). A watch whose item stopped refreshing is deleted too:
+its title and price are Best Buy content. **If it fails:** run it by hand with the
+job's `DATABASE_URL`, read the error line, fix the database, and run it again.
+Fix it before the next scheduled run: two missed runs in a row leave Best Buy rows
+past 72 hours.
 
 ### LLM budget / cost exceeded
 **Symptom:** `ops.budget_status(spent, budget)` returns `"over"`; cost dashboard

@@ -171,11 +171,16 @@ def search(q: SearchText, request: Request, response: Response, background: Back
     eBay listings in their own unrated box, and the store attribution.
 
     An anonymous response is the same for everyone, so the edge may cache it for
-    five minutes. A signed-in one is never cached."""
+    five minutes. A signed-in one is never cached, and neither is a degraded one
+    (a store did not answer), so one slow call never blanks a query for minutes."""
     result = shop.shop_search(q, k)
     background.add_task(_remember_offers, result["results"], who.tenant_id)
-    signed_in = "authorization" in request.headers
-    response.headers["Cache-Control"] = "private, no-store" if signed_in else "public, max-age=300"
+    if "authorization" in request.headers:
+        response.headers["Cache-Control"] = "private, no-store"
+    elif result["degraded"]:
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["Cache-Control"] = "public, max-age=300"
     return result
 
 
@@ -219,7 +224,8 @@ def ranked(q: str, background: BackgroundTasks, k: int = 12,
     return {
         "query": q,
         "count": len(scored),
-        "median_price": round(median, 2),
+        "median_price": None if shop.verdict_mode() == "check" else round(median, 2),
+        "attribution": shop.attribution_for(scored),
         "sources_live": result.get("sources_live", []),
         "residual_threshold": SUSPICIOUS_RESIDUAL_FRAC,   # domain constant, not hardcoded in the UI
         "modeled": sum(1 for x in scored if x["basis"] == "model"),
@@ -378,7 +384,7 @@ def _stream_search(query: str, sources):
     snapshot-backed stub in tests).
     """
     seen: dict[str, object] = {}
-    for src in sources:
+    for src in sources:   # rows a store's terms forbid mixing are dropped before anything else
         try:
             if not src.available():
                 continue
@@ -391,16 +397,23 @@ def _stream_search(query: str, sources):
             continue
         batch = []
         for p in found:
+            if not licensing.may_comingle(p.source):
+                continue
             k = dedup_key(p)
             if k not in seen or p.price < seen[k].price:
                 seen[k] = p
             batch.append({"id": p.id, "title": p.title, "price": p.price,
                           "source": p.source, "url": p.url, "image_url": p.image_url})
-        yield _sse("results", {"source": getattr(src, "name", "?"), "results": batch})
+        if batch:
+            yield _sse("results", {"source": getattr(src, "name", "?"), "results": batch})
 
     items = list(seen.values())
-    median = round(statistics.median([p.price for p in items]), 2) if items else 0.0
-    yield _sse("done", {"query": query, "count": len(items), "median_price": median})
+    rated = [p.price for p in items if licensing.may_verdict(p.source)]
+    median = round(statistics.median(rated), 2) if rated else 0.0
+    if shop.verdict_mode() == "check":   # a market median is a price signal too
+        median = None
+    yield _sse("done", {"query": query, "count": len(items), "median_price": median,
+                        "attribution": shop.attribution_for([{"source": p.source} for p in items])})
 
 
 @app.get("/search/stream")

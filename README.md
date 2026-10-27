@@ -62,7 +62,7 @@ Each store's terms decide what DealFinder may do with its rows. One table,
 
 | Store | Verdict | Stored | Embedded | Ranked with other stores | Kept at most |
 |---|---|---|---|---|---|
-| Best Buy | yes | yes | yes | yes | 72 h (purged at 59 h) |
+| Best Buy | yes | yes | yes | yes | 72 h (purged at 47 h) |
 | eBay | no | no | no | no | 15 min in memory |
 | Unknown source | no | no | no | no | not kept |
 

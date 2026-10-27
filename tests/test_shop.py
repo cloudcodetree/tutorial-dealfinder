@@ -170,3 +170,32 @@ def test_check_finds_the_category_from_a_bare_model_name(monkeypatch):
 
 def test_check_does_not_guess_from_a_weak_match():
     assert shop._fair_for("Mystery widget 3000") == (None, None)
+
+
+def test_slow_ebay_box_does_not_hold_the_search(monkeypatch):
+    import time as _time
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": [], "sources_live": []})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: _time.sleep(2.0) or {"enabled": True, "note": "n", "items": ["late"]})
+    monkeypatch.setattr(shop, "SOURCE_TIMEOUT_S", 0.2)
+    t0 = _time.monotonic()
+    out = shop.shop_search("tv")
+    assert _time.monotonic() - t0 < 1.0
+    assert out["ebay"]["items"] == []
+
+
+def test_ebay_failure_is_cached_briefly(monkeypatch):
+    calls = []
+    fake = _FakeEbay(calls)
+
+    def failing(query, limit=15):
+        calls.append(query)
+        raise RuntimeError("eBay down")
+
+    fake.search = failing
+    monkeypatch.setattr(shop, "EBAY", fake)
+    start = shop._now()
+    assert shop.ebay_box("tv")["items"] == [] and shop.ebay_box("tv")["items"] == []
+    assert len(calls) == 1
+    monkeypatch.setattr(shop, "_now", lambda: start + shop.EBAY_FAILURE_TTL_S + 1)
+    shop.ebay_box("tv")
+    assert len(calls) == 2

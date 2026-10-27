@@ -36,10 +36,10 @@ def test_purge_removes_rows_past_policy_age(clean):
     db = clean
     retention.purge_expired(now=NOW, url=db)   # clear rows other tests left behind, so counts are exact
     with db_mod.job_scope(url=db) as cur:
-        for oid, hours in (("ret-bb-fresh", 58), ("ret-bb-old", 60)):
+        for oid, hours in (("ret-bb-fresh", 46), ("ret-bb-old", 48)):
             cur.execute("""insert into dealfinder.offers (tenant_id, id, title, source, price, fetched_at)
                            values ('public', %s, 'TV', 'BestBuy', 300, %s)""", (oid, NOW - timedelta(hours=hours)))
-        for owner, oid, hours in (("ret-alice", "ret-bb-fresh", 58), ("ret-bob", "ret-bb-old", 60)):
+        for owner, oid, hours in (("ret-alice", "ret-bb-fresh", 46), ("ret-bob", "ret-bb-old", 48)):
             cur.execute("""insert into dealfinder.watchlist (user_id, offer_id, title, source, last_price, last_checked_at)
                            values (%s, %s, 'TV', 'BestBuy', 300, %s)""", (owner, oid, NOW - timedelta(hours=hours)))
     assert retention.purge_expired(now=NOW, url=db) == {"offers": 1, "watchlist": 1}
@@ -71,6 +71,9 @@ def test_purge_cli_reports_a_database_error(monkeypatch, capsys):
     assert "down" in capsys.readouterr().err
 
 
-def test_best_buy_cutoff_is_59_hours():
+def test_best_buy_cutoff_survives_one_missed_run():
+    # The purge runs every 12 h. Even if one run fails, the next one must still
+    # delete a Best Buy row before it is 72 h old: cut-off + 2 × 12 h < 72 h.
     from dealfinder.licensing import POLICIES
-    assert POLICIES["BestBuy"].max_age_s - retention.RETENTION_MARGIN_S == 59 * 3600
+    cutoff = POLICIES["BestBuy"].max_age_s - retention.RETENTION_MARGIN_S
+    assert cutoff == 47 * 3600 and cutoff + 2 * 12 * 3600 < 72 * 3600

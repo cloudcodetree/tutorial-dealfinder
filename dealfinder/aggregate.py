@@ -64,7 +64,9 @@ def aggregate(query: str, sources=None, limit: int = 24, target: int = TARGET_RE
               timeout_s: float = SOURCE_TIMEOUT_S) -> dict:
     if sources is None:
         sources = enabled_sources()
-    available = [s for s in sources if s.available() and not _benched(s.name)]
+    configured = [s for s in sources if s.available()]
+    benched = [s.name for s in configured if _benched(s.name)]   # cooling down: skipped, and reported
+    available = [s for s in configured if s.name not in benched]
     real = [s for s in available if not _is_fallback(s)]
 
     products, live, throttled, timed_out = [], [], [], []
@@ -126,6 +128,7 @@ def aggregate(query: str, sources=None, limit: int = 24, target: int = TARGET_RE
         "sources_live": live,
         "throttled": throttled,
         "timed_out": timed_out,
+        "benched": benched,
         "median_price": round(median, 2),
         "count": len(ranked),
         "results": [
