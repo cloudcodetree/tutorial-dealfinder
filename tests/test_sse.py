@@ -29,7 +29,7 @@ class _StubSource:
 
 
 def test_stream_emits_data_events_and_done(monkeypatch):
-    monkeypatch.setattr(serve, "LIVE_SOURCES", [_StubSource()])
+    monkeypatch.setattr(serve, "enabled_sources", lambda: [_StubSource()])
 
     with client.stream("GET", "/search/stream?q=noise+cancelling+headphones") as r:
         assert r.status_code == 200
@@ -46,7 +46,7 @@ def test_stream_emits_data_events_and_done(monkeypatch):
 
 
 def test_stream_still_terminates_when_no_sources(monkeypatch):
-    monkeypatch.setattr(serve, "LIVE_SOURCES", [])
+    monkeypatch.setattr(serve, "enabled_sources", lambda: [])
     with client.stream("GET", "/search/stream?q=whatever") as r:
         body = "".join(r.iter_text())
     # no results, but the stream still closes cleanly with a done event

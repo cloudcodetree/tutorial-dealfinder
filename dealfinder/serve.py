@@ -30,7 +30,7 @@ from .deal import deal_score
 from .dealscore import fair_price
 from .features import featurize
 from .ingest import dedup_key
-from .live_sources import LIVE_SOURCES
+from .live_sources import EBAY, enabled_sources
 from .rag import _category_models, _load_medians
 from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
@@ -483,7 +483,7 @@ def search_stream(q: str):
     sources as `/search`; runs live with the learner's own source keys, and
     still streams from whatever sources are available offline."""
     return StreamingResponse(
-        _stream_search(q, LIVE_SOURCES),
+        _stream_search(q, enabled_sources()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -1319,8 +1319,9 @@ def dataset_report():
 
 @app.get("/sources")
 def sources():
-    """Which live sources are configured right now."""
-    return {s.name: s.available() for s in LIVE_SOURCES}
+    """Which live sources are configured right now. eBay is listed apart: it feeds
+    only the unrated eBay box, never the live search."""
+    return {**{s.name: s.available() for s in enabled_sources()}, "eBay": EBAY.available()}
 
 
 @app.get("/me")

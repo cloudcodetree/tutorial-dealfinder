@@ -203,8 +203,10 @@ class EbaySource:
     """eBay Browse API — official first-party search over live marketplace inventory
     (new + used/refurb), no scraping, no blocking. Adds resale deals the retail
     APIs miss. OAuth client-credentials with token caching; sandbox/prod chosen by
-    the app id (…-SBX-… = sandbox) or EBAY_ENV. Set EBAY_CAMPAIGN_ID to earn
-    affiliate commission via the returned affiliate URL."""
+    the app id (…-SBX-… = sandbox) or EBAY_ENV.
+
+    Not a live source: eBay's terms forbid rating, mixing or storing its listings
+    (see licensing.py), so the shopper sees them only in shop.ebay_box."""
 
     name = "eBay"
     tier = 1  # official API, fast + reliable
@@ -213,10 +215,11 @@ class EbaySource:
         self._token: str | None = None
         self._expires = 0.0
 
+    def is_sandbox(self) -> bool:
+        return os.getenv("EBAY_ENV", "").lower() == "sandbox" or "SBX" in os.getenv("EBAY_APP_ID", "")
+
     def _base(self) -> str:
-        app = os.getenv("EBAY_APP_ID", "")
-        sandbox = os.getenv("EBAY_ENV", "").lower() == "sandbox" or "SBX" in app
-        return "https://api.sandbox.ebay.com" if sandbox else "https://api.ebay.com"
+        return "https://api.sandbox.ebay.com" if self.is_sandbox() else "https://api.ebay.com"
 
     def available(self) -> bool:
         return bool(os.getenv("EBAY_APP_ID") and os.getenv("EBAY_CERT_ID"))
@@ -242,9 +245,6 @@ class EbaySource:
         if not self.available():
             return []
         headers = {"Authorization": f"Bearer {self._get_token()}"}
-        campaign = os.getenv("EBAY_CAMPAIGN_ID")
-        if campaign:  # affiliate attribution → itemAffiliateWebUrl in the response
-            headers["X-EBAY-C-ENDUSERCTX"] = f"affiliateCampaignId={campaign}"
         r = httpx.get(
             self._base() + "/buy/browse/v1/item_summary/search",
             headers=headers, params={"q": query, "limit": str(limit)}, timeout=30,
@@ -261,7 +261,7 @@ class EbaySource:
                 id=f"ebay-{str(it.get('itemId', ''))[-40:]}",
                 title=(it.get("title") or query)[:120], brand=None, category="product",
                 price=price, currency=(it.get("price") or {}).get("currency", "USD"),
-                url=it.get("itemAffiliateWebUrl") or it.get("itemWebUrl") or "",
+                url=it.get("itemWebUrl") or "",
                 source=f"{self.name}:{cond}", image_url=(it.get("image") or {}).get("imageUrl"),
             ))
         return out
@@ -292,20 +292,50 @@ class BestBuySource:
         r = httpx.get(url, timeout=20)
         if r.status_code != 200:
             return []
-        out = []
-        for p in r.json().get("products", []):
-            price = _f(p.get("salePrice"))
-            if not price:
-                continue
-            reg = p.get("regularPrice")
-            on_sale = bool(reg) and p.get("salePrice", reg) < reg
-            out.append(Product(
-                id=f"bestbuy-{p.get('sku')}", title=(p.get("name") or query)[:120],
-                brand=p.get("manufacturer"), category="product", price=price,
-                url=p.get("url") or "", source=self.name + (":sale" if on_sale else ""),
-                image_url=p.get("image"),
-            ))
-        return out
+        return [x for p in r.json().get("products", []) if (x := self._product(p, query))]
+
+    def _product(self, p: dict, fallback_title: str) -> Product | None:
+        price = _f(p.get("salePrice"))
+        if not price:
+            return None
+        reg = p.get("regularPrice")
+        on_sale = bool(reg) and p.get("salePrice", reg) < reg
+        return Product(
+            id=f"bestbuy-{p.get('sku')}", title=(p.get("name") or fallback_title)[:120],
+            brand=p.get("manufacturer"), category="product", price=price,
+            url=p.get("url") or "", source=self.name + (":sale" if on_sale else ""),
+            image_url=p.get("image"),
+            sku=str(p["sku"]) if p.get("sku") is not None else None,
+            regular_price=_f(reg),
+        )
+
+    def lookup_skus(self, skus: list[str]) -> dict[str, Product]:
+        """Current price and title for known SKUs, keyed by SKU.
+
+        A SKU missing from the answer is gone from Best Buy. A failed batch raises
+        RuntimeError, so callers can tell "gone" from "failed" (a failed lookup
+        must never refresh a row's freshness)."""
+        wanted = list(dict.fromkeys(str(s) for s in skus))
+        bad = [s for s in wanted if not re.fullmatch(r"\d{1,12}", s)]
+        if bad:
+            raise ValueError(f"not a Best Buy SKU: {bad[0]!r}")
+        key = os.getenv("BESTBUY_API_KEY")
+        if not key or not wanted:
+            return {}
+        show = "sku,name,salePrice,regularPrice,url,image,manufacturer"
+        found: dict[str, Product] = {}
+        for i in range(0, len(wanted), 100):
+            if i:
+                time.sleep(0.2)  # Best Buy allows 5 requests per second
+            batch = ",".join(wanted[i:i + 100])
+            r = httpx.get(f"https://api.bestbuy.com/v1/products(sku in({batch}))?apiKey={key}"
+                          f"&format=json&show={show}&pageSize=100", timeout=20)
+            if r.status_code != 200:
+                raise RuntimeError(f"bestbuy lookup failed: {r.status_code}")
+            for p in r.json().get("products", []):
+                if (x := self._product(p, "")) and x.sku:
+                    found[x.sku] = x
+        return found
 
 
 class ShopifySource:
@@ -410,5 +440,29 @@ class FirecrawlSource:
         return out
 
 
-LIVE_SOURCES = [EbaySource(), RapidApiSource(), BestBuySource(), AmazonSource(),
+LIVE_SOURCES = [RapidApiSource(), BestBuySource(), AmazonSource(),
                 ApifySource(), ShopifySource(), FirecrawlSource(), ItunesSource()]
+
+# The one eBay client. It is not in LIVE_SOURCES: shop.ebay_box is its only caller,
+# and sharing one instance keeps its OAuth token cached across requests.
+EBAY = EbaySource()
+
+
+def enabled_sources(names: str | None = None) -> list:
+    """The live sources to search, from ``names`` or env DEALFINDER_SOURCES.
+
+    Unset or empty means every course source. Otherwise a comma list, matched
+    case-insensitively and returned in LIVE_SOURCES order. Production runs
+    ``DEALFINDER_SOURCES=BestBuy``."""
+    raw = os.getenv("DEALFINDER_SOURCES", "") if names is None else names
+    asked = [n.strip() for n in raw.split(",") if n.strip()]
+    if not asked:
+        return list(LIVE_SOURCES)
+    known = {s.name.lower() for s in LIVE_SOURCES}
+    for name in asked:
+        if name.lower() == EBAY.name.lower():
+            raise ValueError("eBay is served only by shop.ebay_box")
+        if name.lower() not in known:
+            raise ValueError(f"unknown source: {name}")
+    wanted = {n.lower() for n in asked}
+    return [s for s in LIVE_SOURCES if s.name.lower() in wanted]

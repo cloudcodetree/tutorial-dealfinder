@@ -22,3 +22,8 @@ def test_unknown_source_is_denied_everything():
 
 def test_launch_sources_are_best_buy_and_ebay_only():
     assert licensing.LAUNCH_SOURCES == {"BestBuy", "eBay"}
+
+
+def test_every_source_class_has_a_policy():
+    from dealfinder.live_sources import EBAY, LIVE_SOURCES
+    assert all(licensing.policy_for(s.name) for s in [*LIVE_SOURCES, EBAY])
