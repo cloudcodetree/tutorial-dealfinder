@@ -7,13 +7,33 @@ estimate. `/ranked` (the lab) and, from Task 6, the shopper `/search` share it.
 """
 from __future__ import annotations
 
+import os
 import re
+import statistics
+import threading
+import time
 import unicodedata
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from functools import lru_cache
 
 from . import licensing
+from .aggregate import _utc_iso, aggregate
+from .live_sources import EBAY
 
 NOT_RATED_REASON = "Not rated: this store's terms don't allow price ratings."
+EBAY_NOTE = "Listings from eBay. Not compared or rated."
+# eBay's terms cap listing age at 6 hours (licensing.py); this box keeps its own
+# rows 15 minutes, and nothing else ever holds them.
+EBAY_CACHE_TTL_S = 900
+_EBAY_CACHE_MAX = 256
+_ebay_cache: OrderedDict[str, tuple[float, list[dict]]] = OrderedDict()
+_ebay_lock = threading.Lock()
+
+
+def _now() -> float:
+    return time.monotonic()
 
 
 def _embed_texts(texts):
@@ -163,3 +183,72 @@ def score_offers(offers: list[dict], median: float) -> list[dict]:
         })
     scored.sort(key=_value, reverse=True)
     return scored
+
+
+def _ebay_enabled() -> bool:
+    """Sandbox listings are fake, so they never show unless a developer opts in."""
+    if not EBAY.available():
+        return False
+    return not EBAY.is_sandbox() or os.getenv("DEALFINDER_EBAY_ALLOW_SANDBOX") == "1"
+
+
+def ebay_box(q: str, limit: int = 6) -> dict:
+    """The separate "Also on eBay" box: eBay's own listings, in eBay's own order.
+
+    Never rated, scored, ranked against other stores, embedded or stored. The
+    rows live only in this module's short cache."""
+    if not _ebay_enabled():
+        return {"enabled": False, "note": EBAY_NOTE, "items": []}
+    key = q.strip().lower()
+    now = _now()
+    with _ebay_lock:
+        hit = _ebay_cache.get(key)
+        if hit and now - hit[0] < EBAY_CACHE_TTL_S:
+            _ebay_cache.move_to_end(key)
+            return {"enabled": True, "note": EBAY_NOTE, "items": hit[1][:limit]}
+    try:
+        items = [{
+            "id": p.id, "title": p.title, "price": p.price, "currency": p.currency, "url": p.url,
+            "condition": p.source.split(":", 1)[1] if ":" in p.source else "", "image_url": p.image_url,
+        } for p in EBAY.search(q.strip(), limit=limit)[:limit]]
+    except Exception:
+        return {"enabled": True, "note": EBAY_NOTE, "items": []}
+    with _ebay_lock:
+        _ebay_cache[key] = (now, items)
+        _ebay_cache.move_to_end(key)
+        while len(_ebay_cache) > _EBAY_CACHE_MAX:
+            _ebay_cache.popitem(last=False)
+    return {"enabled": True, "note": EBAY_NOTE, "items": items}
+
+
+def shop_search(q: str, k: int = 12) -> dict:
+    """The shopper search: rated store results, the separate eBay box, attribution.
+
+    The live sources and the eBay box are fetched at the same time."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        live = pool.submit(aggregate, q)
+        box = pool.submit(ebay_box, q)
+        result = live.result()
+        try:
+            ebay = box.result()
+        except Exception:
+            ebay = {"enabled": False, "note": EBAY_NOTE, "items": []}
+    offers = result.get("results", [])
+    rated = [float(r["price"]) for r in offers if licensing.may_verdict(r.get("source", ""))]
+    median = statistics.median(rated) if rated else 0.0
+    results = score_offers(offers, median)[:k]
+    attribution = []
+    for r in results:
+        policy = licensing.policy_for(r["source"])
+        if policy and policy.attribution and policy.attribution not in attribution:
+            attribution.append(policy.attribution)
+    return {
+        "query": q,
+        "mode": "live",
+        "count": len(results),
+        "median_price": round(median, 2),
+        "fetched_at": _utc_iso(datetime.now(timezone.utc)),
+        "results": results,
+        "ebay": ebay,
+        "attribution": attribution,
+    }

@@ -17,7 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -84,10 +84,6 @@ def _maybe_recheck_db() -> None:
     _DB_CHECKED_AT = time.monotonic()
     _DB = _db_ready()
 
-
-def _embed_texts(texts):
-    from .embed import embed_texts
-    return embed_texts(texts)
 
 _catalog = load_catalog()
 _idx = {p.id: i for i, p in enumerate(_catalog)}
@@ -163,19 +159,23 @@ def readyz():
     return JSONResponse(_READY[2], status_code=_READY[1])
 
 
+# A shopper's search text: 1-200 characters after trimming, no NUL byte.
+SearchText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200,
+                                              pattern=r"^[^\x00]+$")]
+
+
 @app.get("/search")
-def search(q: str, who: Principal = Depends(current_principal)):
-    """Aggregate live deals across sources; persist + embed them under the caller's
-    tenant when a DB is set (RLS keeps each tenant's history private)."""
-    result = aggregate(q)
-    if _DB and result["results"]:
-        try:
-            texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
-            pgstore.upsert(result["results"], _embed_texts(texts), tenant=who.tenant_id)
-            result["persisted"] = pgstore.count(tenant=who.tenant_id)
-            result["tenant"] = who.tenant_id
-        except Exception:
-            pass
+def search(q: SearchText, request: Request, response: Response, background: BackgroundTasks,
+           k: Annotated[int, Query(ge=1, le=24)] = 12, who: Principal = Depends(current_principal)):
+    """The shopper search: Best Buy rows with verdicts where the store allows them,
+    eBay listings in their own unrated box, and the store attribution.
+
+    An anonymous response is the same for everyone, so the edge may cache it for
+    five minutes. A signed-in one is never cached."""
+    result = shop.shop_search(q, k)
+    background.add_task(_remember_offers, result["results"], who.tenant_id)
+    signed_in = "authorization" in request.headers
+    response.headers["Cache-Control"] = "private, no-store" if signed_in else "public, max-age=300"
     return result
 
 

@@ -5,6 +5,13 @@ from dealfinder import licensing, shop
 from tests.conftest import row
 
 
+@pytest.fixture(autouse=True)
+def _fresh_ebay_cache():
+    shop._ebay_cache.clear()
+    yield
+    shop._ebay_cache.clear()
+
+
 def test_peer_fair_prices_flags_the_within_cluster_outlier(monkeypatch):
     # The category-agnostic fallback: an offer's fair price is the median of its
     # nearest semantic neighbors in the result set. With identical embeddings every
@@ -54,3 +61,60 @@ def test_offer_slug(title, sku, slug):
 def test_offer_slug_caps_the_title_part():
     s = shop.offer_slug("word " * 40, "9")
     assert len(s.removesuffix("-bestbuy-9")) <= 60 and not s.startswith("-")
+
+
+def test_ebay_box_hidden_without_keys():
+    assert shop.ebay_box("x") == {"enabled": False, "note": "Listings from eBay. Not compared or rated.", "items": []}
+
+
+def test_ebay_box_hides_sandbox_data(monkeypatch):
+    monkeypatch.setenv("EBAY_APP_ID", "x-SBX-y")
+    monkeypatch.setenv("EBAY_CERT_ID", "c")
+    assert shop.ebay_box("x")["enabled"] is False
+
+
+class _FakeEbay:
+    """Production-looking eBay client that records searches."""
+
+    def __init__(self, calls, items=()):
+        self.calls, self.items = calls, list(items)
+
+    def available(self):
+        return True
+
+    def is_sandbox(self):
+        return False
+
+    def search(self, query, limit=15):
+        self.calls.append(query)
+        return self.items
+
+
+def test_ebay_box_caches_at_most_15_minutes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(shop, "EBAY", _FakeEbay(calls))
+    start = shop._now()
+    shop.ebay_box("TV")
+    shop.ebay_box(" tv ")
+    assert len(calls) == 1
+    monkeypatch.setattr(shop, "_now", lambda: start + 901)
+    shop.ebay_box("tv")
+    assert len(calls) == 2
+
+
+def test_ebay_box_keeps_ebays_order_and_shape(monkeypatch):
+    from dealfinder.schema import Product
+    items = [Product(id=f"ebay-{i}", title=f"Item {i}", brand=None, category="product", price=p,
+                     url=f"https://ebay/{i}", source="eBay:Used", image_url=None) for i, p in enumerate([30.0, 10.0, 20.0])]
+    monkeypatch.setattr(shop, "EBAY", _FakeEbay([], items))
+    box = shop.ebay_box("x", limit=2)
+    assert box["enabled"] is True and [i["id"] for i in box["items"]] == ["ebay-0", "ebay-1"]
+    assert box["items"][0] == {"id": "ebay-0", "title": "Item 0", "price": 30.0, "currency": "USD",
+                               "url": "https://ebay/0", "condition": "Used", "image_url": None}
+
+
+def test_ebay_box_survives_an_ebay_error(monkeypatch):
+    fake = _FakeEbay([])
+    fake.search = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("eBay down"))
+    monkeypatch.setattr(shop, "EBAY", fake)
+    assert shop.ebay_box("x")["items"] == []

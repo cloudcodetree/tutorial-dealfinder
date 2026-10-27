@@ -4,10 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dealfinder import db as db_mod
-from dealfinder import pgstore, serve, userstore
+from dealfinder import licensing, pgstore, serve, shop, userstore
 from dealfinder.cache import SemanticCache
 from dealfinder.serve import _catalog, app
-from tests.conftest import bearer
+from tests.conftest import bearer, row
 
 client = TestClient(app)
 
@@ -522,3 +522,57 @@ def test_supabase_js_is_pinned_with_sri():
     assert re.search(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/supabase-js@2\.45\.4/dist/umd/supabase\.js"'
                      r' integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"'
                      r' crossorigin="anonymous"></script>', _lab_html())
+
+
+def _bestbuy_rows():
+    return [row(f"bestbuy-{i}", f"Headphones {i}", p, "BestBuy", sku=str(i)) for i, p in enumerate([100.0, 200.0, 300.0])]
+
+
+def _stub_search(monkeypatch, results, ebay_items=()):
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": list(results), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": bool(ebay_items), "note": "n",
+                                                               "items": list(ebay_items)})
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: [[1.0, 0.0] for _ in t])
+
+
+def test_ebay_never_reaches_results_median_peers_or_db(monkeypatch):
+    bb = _bestbuy_rows()
+    stray = row("ebay-7", "EBAY ONLY TITLE", 1.0, "eBay:Used")
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": bb + [stray], "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": True, "note": "n", "items": [
+        {"id": "ebay-9", "title": "t", "price": 5.0, "currency": "USD", "url": "u", "condition": "Used", "image_url": None}]})
+    embedded, stored = [], []
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: embedded.extend(t) or [[1.0, 0.0] for _ in t])
+    monkeypatch.setattr(serve, "_DB", True)
+    monkeypatch.setattr(pgstore, "upsert", lambda rows, emb, tenant="public", url=None: stored.append(rows) or 0)
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert {r["source"] for r in body["results"]} == {"BestBuy"} and body["median_price"] == 200.0
+    assert "EBAY ONLY TITLE" not in embedded
+    assert stored and not any(r["id"].startswith("ebay") for rows in stored for r in rows)
+    assert body["ebay"]["items"][0]["id"] == "ebay-9" and "verdict" not in body["ebay"]["items"][0]
+
+
+def test_search_response_matches_the_contract(monkeypatch):
+    _stub_search(monkeypatch, _bestbuy_rows())
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert set(body) == {"query", "mode", "count", "median_price", "fetched_at", "results", "ebay", "attribution"}
+    assert {"id", "sku", "slug", "title", "brand", "source", "price", "regular_price", "url", "image_url",
+            "verdict", "pct_under_median", "fair", "residual_frac", "basis", "reason"} <= set(body["results"][0])
+    assert body["attribution"] == [licensing.POLICIES["BestBuy"].attribution]
+    assert body["mode"] == "live" and body["fetched_at"].endswith("Z")
+    _stub_search(monkeypatch, [])
+    empty_body = client.get("/search", params={"q": "headphones"}).json()
+    assert empty_body["attribution"] == [] and empty_body["results"] == [] and empty_body["median_price"] == 0.0
+
+
+@pytest.mark.parametrize("params", [{"q": ""}, {"q": "   "}, {"q": "x" * 201}, {"q": "ok", "k": 0},
+                                    {"q": "ok", "k": 25}, {"q": "a\x00b"}])
+def test_search_validates_input(params):
+    assert client.get("/search", params=params).status_code == 422
+
+
+def test_anonymous_search_is_edge_cacheable_and_signed_in_is_private(monkeypatch, mint):
+    _stub_search(monkeypatch, _bestbuy_rows())
+    assert client.get("/search", params={"q": "tv"}).headers["cache-control"] == "public, max-age=300"
+    signed = client.get("/search", params={"q": "tv"}, headers=bearer(mint("u-1")))
+    assert signed.headers["cache-control"] == "private, no-store"
