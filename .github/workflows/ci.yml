@@ -33,6 +33,23 @@ jobs:
       - run: python -m dealfinder.run_evals   # quality gate — fails the build on regression
       - run: ruff check .
 
+  # The deals Worker (edge/): unit tests and a typecheck on every push and PR.
+  edge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: edge/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main'

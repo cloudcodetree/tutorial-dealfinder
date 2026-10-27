@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dealfinder-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-20",
+  "routes": [{ "pattern": "deals.cloudcodetree.com", "custom_domain": true }],
+  // The Worker runs first for every path, so the security headers and the
+  // pre-launch noindex reach static assets too.
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  // The site uses namespaces 4101 and 4102, so these share no counters.
+  "ratelimits": [
+    { "name": "ASK_LIMITER", "namespace_id": "4201", "simple": { "limit": 5, "period": 60 } },
+    { "name": "STREAM_LIMITER", "namespace_id": "4202", "simple": { "limit": 30, "period": 10 } }
+  ],
+  "vars": {
+    // Task 12 sets this from `tofu -chdir=deploy/gcp output -raw api_url`.
+    "BACKEND_ORIGIN": "https://backend-not-deployed.invalid",
+    "LAUNCHED": "false"
+  },
+  // Invocation logs stay off, so no URL with query text is ever logged (site precedent).
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }
+  // Secret: EDGE_SHARED_SECRET (python deploy/secrets.py edge).
+}
