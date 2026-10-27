@@ -116,7 +116,6 @@ def main() -> int:
                 "source": src,
                 "marketplace": marketplace,
                 "url": it.get("url"),
-                "image_url": it.get("image_url"),
                 "deal_pct": it.get("deal_pct"),
                 "median_price_at_capture": median,
             })

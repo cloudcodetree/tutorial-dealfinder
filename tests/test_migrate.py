@@ -52,3 +52,16 @@ def test_db_ready_never_migrates(monkeypatch):
 def test_serve_source_has_no_migration_calls():
     src = Path(serve.__file__).read_text()
     assert "migrate.apply" not in src and "pgstore.migrate" not in src and "userstore.migrate" not in src
+
+
+def test_job_role_cannot_bypass_rls(db):
+    with psycopg.connect(db) as c:
+        assert c.execute("select rolsuper, rolbypassrls from pg_roles where rolname='dealfinder_job'").fetchone() == (False, False)
+
+
+def test_every_rls_table_has_a_job_policy(db):
+    with psycopg.connect(db) as c:
+        missing = c.execute("""select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'dealfinder' and c.relrowsecurity and not exists (select 1 from pg_policy p
+            where p.polrelid = c.oid and 'dealfinder_job'::regrole = any(p.polroles))""").fetchall()
+    assert missing == []

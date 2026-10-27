@@ -18,7 +18,7 @@ managed Postgres (Supabase, through its pooler).
 """
 from __future__ import annotations
 
-from . import db
+from . import db, licensing
 
 EMBED_DIM = 384  # bge-small-en-v1.5
 DEFAULT_TENANT = "public"
@@ -37,26 +37,40 @@ def migrate(url: str | None = None) -> list[str]:
 
 def upsert(products: list[dict], embeddings: list | None, tenant: str = DEFAULT_TENANT,
            url: str | None = None) -> int:
-    """Insert or refresh offers for `tenant`. A `None` embedding keeps the stored one."""
+    """Insert or refresh offers for `tenant`; returns how many rows were written.
+
+    The license decides (licensing.py): a row whose store forbids storage is
+    skipped, and a row whose store forbids embedding never gets a vector. A
+    `None` embedding keeps the stored one. `fetched_at` comes from the row
+    (when its source answered), else now."""
     embs = embeddings if embeddings is not None else [None] * len(products)
+    written = 0
     with db.scoped(tenant_id=tenant, url=url) as cur:
         for p, emb in zip(products, embs):
+            if not licensing.may_store(p.get("source", "")):
+                continue
+            if not licensing.may_embed(p["source"]):
+                emb = None
             cur.execute(
                 """
                 INSERT INTO dealfinder.offers
-                    (tenant_id, id, title, brand, source, price, currency, url, image_url, embedding)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::vector)
+                    (tenant_id, id, title, brand, source, price, currency, url, image_url, embedding,
+                     sku, regular_price, fetched_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::vector,%s,%s,COALESCE(%s::timestamptz, now()))
                 ON CONFLICT (tenant_id, id) DO UPDATE SET
                     title=EXCLUDED.title, brand=EXCLUDED.brand, price=EXCLUDED.price,
                     source=EXCLUDED.source, currency=EXCLUDED.currency, url=EXCLUDED.url,
-                    image_url=EXCLUDED.image_url,
+                    image_url=EXCLUDED.image_url, sku=EXCLUDED.sku,
+                    regular_price=EXCLUDED.regular_price,
                     embedding=COALESCE(EXCLUDED.embedding, offers.embedding),
-                    fetched_at=now()
+                    fetched_at=EXCLUDED.fetched_at
                 """,
                 (tenant, p["id"], p["title"], p.get("brand"), p["source"], p["price"],
-                 p.get("currency") or "USD", p.get("url"), p.get("image_url"), _vec(emb)),
+                 p.get("currency") or "USD", p.get("url"), p.get("image_url"), _vec(emb),
+                 p.get("sku"), p.get("regular_price"), p.get("fetched_at")),
             )
-    return len(products)
+            written += 1
+    return written
 
 
 def semantic_search(query_embedding, k: int = 12, tenant: str = DEFAULT_TENANT,

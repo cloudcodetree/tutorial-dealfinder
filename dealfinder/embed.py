@@ -12,7 +12,10 @@ offline and reproducible.
 """
 from __future__ import annotations
 
+import hashlib
 import threading
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +61,45 @@ def product_text(p: Product) -> str:
 
 def embed_texts(texts: list[str]) -> np.ndarray:
     return np.array(list(_get_model().embed(texts)), dtype=float)
+
+
+# Live titles and queries repeat (the same Best Buy listing on every search for
+# it), so each text's vector is cached in this process: at most 4,096 entries,
+# each for 6 hours, least recently used out first.
+EMBED_CACHE_TTL_S = 6 * 3600
+_EMBED_CACHE_MAX = 4096
+_embed_cache: OrderedDict[str, tuple[float, np.ndarray]] = OrderedDict()
+_embed_cache_lock = threading.Lock()
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def embed_texts_cached(texts: list[str]) -> np.ndarray:
+    """``embed_texts`` with a per-text cache keyed by the text's SHA-256.
+
+    Misses are embedded in one batch. Thread-safe."""
+    keys = [hashlib.sha256(t.encode()).hexdigest() for t in texts]
+    now = _now()
+    found: dict[str, np.ndarray] = {}
+    with _embed_cache_lock:
+        for k in keys:
+            hit = _embed_cache.get(k)
+            if hit and now - hit[0] < EMBED_CACHE_TTL_S:
+                found[k] = hit[1]
+                _embed_cache.move_to_end(k)
+    missing = {k: t for k, t in zip(keys, texts) if k not in found}
+    if missing:
+        vecs = embed_texts(list(missing.values()))
+        with _embed_cache_lock:
+            for k, v in zip(missing, vecs):
+                found[k] = v
+                _embed_cache[k] = (now, v)
+                _embed_cache.move_to_end(k)
+            while len(_embed_cache) > _EMBED_CACHE_MAX:
+                _embed_cache.popitem(last=False)
+    return np.array([found[k] for k in keys], dtype=float)
 
 
 def load_title_embeddings(path: Path | str | None = None) -> tuple[list[str], np.ndarray]:
