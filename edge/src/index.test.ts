@@ -105,6 +105,25 @@ describe('dealfinder-edge', () => {
     expect((await call('/api/check?title=x&price=1')).status).toBe(503);
   });
 
+  it('never sends the edge secret off the backend origin', async () => {
+    for (const p of ['/api//evil.test/x', '/api/%2F%2Fevil.test/x', '/lab//evil.test/x']) {
+      const res = await call(p);
+      expect(res.status).toBe(400);
+    }
+    expect(sent.length).toBe(0);
+  });
+
+  it('rejects encoded paths, so a limiter cannot be skipped by spelling', async () => {
+    env.ASK_LIMITER = { limit: async () => ({ success: false }) } as unknown as RateLimit;
+    expect((await call('/api/a%73k?q=x')).status).toBe(400);
+    expect(sent.length).toBe(0);
+  });
+
+  it('a cached search sends the backend exactly the values in its cache key', async () => {
+    await call('/api/search?q=TV&q=evil&k=5&k=24&utm=x');
+    expect(lastFetch().url).toBe('https://backend.test/search?k=5&q=tv');
+  });
+
   it('everything is noindex before launch, assets included', async () => {
     expect((await call('/lab')).headers.get('X-Robots-Tag')).toBe('noindex');
     const page = await call('/');

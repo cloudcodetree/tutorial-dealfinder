@@ -32,14 +32,26 @@ const SEARCH_TTL_S = 300;
 const ASK_PATHS = new Set(['/api/ask', '/api/ask_agentic', '/api/review']);
 const STREAM_PATH = '/api/search/stream';
 
-/** The edge-cache key for an anonymous search: only q (trimmed, lowercased,
- *  whitespace collapsed) and k (default 12). Tracking parameters never split the cache. */
-export function searchCacheKey(url: URL): string | null {
-  if (url.pathname !== '/api/search') return null;
+/** The only two search parameters that matter: q (trimmed, lowercased, whitespace
+ *  collapsed) and k (default 12). The first of a repeated parameter wins. */
+function searchQuery(url: URL): string {
   const q = (url.searchParams.get('q') ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
   const k = url.searchParams.get('k') ?? '12';
-  return `${SITE}/api/search?k=${encodeURIComponent(k)}&q=${encodeURIComponent(q)}`;
+  return '?' + new URLSearchParams({ k, q }).toString();
 }
+
+/** The edge-cache key for an anonymous search. Tracking parameters never split the
+ *  cache, and the backend is sent exactly this query, so what is cached under a key
+ *  is always the answer to that key. */
+export function searchCacheKey(url: URL): string | null {
+  if (url.pathname !== '/api/search') return null;
+  return `${SITE}/api/search${searchQuery(url)}`;
+}
+
+// Percent-encoding, a doubled slash or a backslash in a proxied path is never a real
+// route. Refusing them means the limiters and the backend see the same path, and a
+// path like //host can never resolve to another origin.
+const UNSAFE_PATH = /%|\/\/|\\/;
 
 const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
@@ -52,9 +64,15 @@ function withSiteHeaders(res: Response, env: Env): Response {
   return out;
 }
 
-async function proxy(request: Request, env: Env, backendPath: string): Promise<Response> {
-  const inbound = new URL(request.url);
-  const target = new URL(backendPath + inbound.search, env.BACKEND_ORIGIN);
+async function proxy(request: Request, env: Env, backendPath: string,
+                     search = new URL(request.url).search): Promise<Response> {
+  // Built from fixed parts, never resolved relative to the origin, so the secret
+  // below can only ever go to BACKEND_ORIGIN.
+  const base = new URL(env.BACKEND_ORIGIN);
+  const target = new URL(base.origin);
+  target.pathname = backendPath;
+  target.search = search;
+  if (target.origin !== base.origin) return json({ detail: 'bad path' }, 400);
   const headers = new Headers(request.headers);
   headers.delete('host');
   headers.set('X-DealFinder-Edge', env.EDGE_SHARED_SECRET);    // replaces any forged value
@@ -109,7 +127,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     res.headers.set('X-DealFinder-Cache', 'HIT');
     return res;
   }
-  const res = await proxy(request, env, backendPath);
+  const res = await proxy(request, env, backendPath, searchQuery(url));
   if (shareable(res)) {
     const stored = new Response(res.clone().body, res);
     stored.headers.set('Cache-Control', `public, s-maxage=${SEARCH_TTL_S}`);
@@ -125,7 +143,8 @@ export default {
     const { pathname } = new URL(request.url);
     const route = routeOf(pathname);
     let res: Response;
-    if (route === 'api') res = await api(request, env, ctx);
+    if (route !== 'assets' && UNSAFE_PATH.test(pathname)) res = json({ detail: 'bad path' }, 400);
+    else if (route === 'api') res = await api(request, env, ctx);
     else if (route === 'lab') res = await proxy(request, env, pathname);
     else res = await env.ASSETS.fetch(request);
     return withSiteHeaders(res, env);
