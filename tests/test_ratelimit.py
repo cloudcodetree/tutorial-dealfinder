@@ -41,3 +41,35 @@ def test_retry_after_counts_down_to_the_oldest_request():
         lim.check("/ask", "ip")
     t[0] = 20.0
     assert lim.check("/ask", "ip") == 40.0
+
+
+def _req(headers, host="10.9.9.9"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(headers={k.lower(): v for k, v in headers.items()}, client=SimpleNamespace(host=host))
+
+
+def test_client_ip_header_is_trusted_only_behind_the_edge_secret(monkeypatch):
+    monkeypatch.delenv("EDGE_SHARED_SECRET", raising=False)
+    assert ratelimit.client_key(_req({"CF-Connecting-IP": "1.2.3.4"})) == "10.9.9.9"   # forgeable: ignored
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    assert ratelimit.client_key(_req({"CF-Connecting-IP": "1.2.3.4"})) == "1.2.3.4"
+
+
+def test_ipv6_clients_share_a_slash_64(monkeypatch):
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    a = ratelimit.client_key(_req({"CF-Connecting-IP": "2001:db8:1:2::1"}))
+    b = ratelimit.client_key(_req({"CF-Connecting-IP": "2001:db8:1:2:ffff::9"}))
+    assert a == b and a != ratelimit.client_key(_req({"CF-Connecting-IP": "2001:db8:1:3::1"}))
+
+
+def test_memory_stays_capped_while_every_client_is_active():
+    lim = ratelimit.Limiter(clock=lambda: 0.0, max_keys=100)
+    for i in range(150):
+        lim.check("/ask", f"10.0.{i // 250}.{i % 250}")
+    assert len(lim) <= 100
+
+
+def test_llm_routes_are_limited_hardest():
+    for path in ("/ask", "/ask_agentic", "/review"):
+        assert ratelimit.LIMITS[path] == (5, 60), path

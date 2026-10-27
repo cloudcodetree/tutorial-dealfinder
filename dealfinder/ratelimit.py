@@ -12,6 +12,7 @@ window per limited path.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import time
 from collections.abc import Callable
@@ -19,10 +20,12 @@ from collections.abc import Callable
 from .compliance import SlidingWindowRateLimiter
 from .settings import is_production
 
-# path -> (requests, window seconds). /ask calls an LLM, so it is limited hardest.
+# path -> (requests, window seconds). The routes that can call an LLM are limited hardest:
+# /ask, /ask_agentic, and /review, whose writer drafts with the LLM.
 LIMITS: dict[str, tuple[int, float]] = {
     "/ask": (5, 60),
     "/ask_agentic": (5, 60),
+    "/review": (5, 60),
     "/search": (30, 10),
     "/search/stream": (30, 10),
     "/check": (30, 10),
@@ -52,25 +55,47 @@ class Limiter:
         key = f"{path}|{client}"
         if window.allow(key, now):
             if len(self) > self.max_keys:
-                self._drop_idle(now)
+                self._shrink(now)
             return None
         return window._events[key][0] + window.window - now
 
-    def _drop_idle(self, now: float) -> None:
-        """Forget every client with no request inside its window, so memory stays bounded."""
+    def _shrink(self, now: float) -> None:
+        """Keep memory under max_keys, even when every client is active.
+
+        Idle clients go first. If that is not enough, the least recently seen go,
+        down to 90% of the cap, so the next shrink waits for many new keys rather
+        than running on every request."""
         for window in self._windows.values():
             idle = [k for k, ev in window._events.items() if not ev or ev[-1] <= now - window.window]
             for k in idle:
                 del window._events[k]
+        excess = len(self) - int(self.max_keys * 0.9)
+        if excess <= 0:
+            return
+        by_age = sorted(((ev[-1], w, k) for w in self._windows.values() for k, ev in w._events.items()),
+                        key=lambda t: t[0])
+        for _, window, key in by_age[:excess]:
+            del window._events[key]
 
 
 def client_key(request) -> str:
-    """The visitor's IP. The Worker sets CF-Connecting-IP from the real visitor, and the
-    edge guard has already rejected any request that did not come through the Worker."""
-    ip = request.headers.get("cf-connecting-ip")
-    if ip:
+    """Who a request counts against: the visitor's IP, or its /64 for IPv6.
+
+    CF-Connecting-IP is trusted only when EDGE_SHARED_SECRET is set. Then the edge
+    guard has already rejected any request that did not come through the Worker,
+    which sets the header from the real visitor. Without the secret anyone could
+    send the header, so the socket's address is used instead. One IPv6 subscriber
+    usually holds a whole /64, so rotating addresses inside it buys nothing."""
+    ip = request.headers.get("cf-connecting-ip") if os.getenv("EDGE_SHARED_SECRET") else None
+    if not ip:
+        ip = request.client.host if request.client else "unknown"
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
         return ip
-    return request.client.host if request.client else "unknown"
+    if addr.version == 6:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return ip
 
 
 def enabled() -> bool:
