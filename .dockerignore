@@ -14,3 +14,15 @@ frontend/dist/
 **/playwright-report/
 **/test-results/
 mlruns/
+# Not part of the service: the front end and Worker deploy separately.
+frontend/
+edge/
+deploy/
+notebooks/
+docs/
+tests/
+infra/
+scripts/
+course/
+*.md
+!README.md
