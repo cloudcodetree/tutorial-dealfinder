@@ -161,3 +161,26 @@ def test_login_role_script_imports_cleanly_as_a_script():
     assert proc.returncode == 0, proc.stderr
     for f in ("deploy/secrets.py", "deploy/create_login_role.py"):
         assert "import secrets\n" not in Path(f).read_text(), f"{f} shadows the stdlib secrets module"
+
+
+def test_role_sql_never_carries_the_plain_password():
+    # Postgres can log DDL (log_statement, pgaudit), so the statement holds only the
+    # SCRAM-SHA-256 verifier, computed here.
+    text = " ".join(s.as_string(None) for s in login_mod.role_statements("pw-literal-xyz"))
+    assert "pw-literal-xyz" not in text and "SCRAM-SHA-256$4096:" in text
+
+
+def test_scram_verifier_lets_the_password_log_in(db):
+    import psycopg
+    from psycopg import sql
+
+    verifier = login_mod.scram_verifier("probe-pass-123")
+    with psycopg.connect(db, autocommit=True) as admin:
+        admin.execute("DROP ROLE IF EXISTS df_scram_probe")
+        admin.execute(sql.SQL("CREATE ROLE df_scram_probe LOGIN PASSWORD {}").format(sql.Literal(verifier)))
+        try:
+            info = psycopg.conninfo.conninfo_to_dict(db)
+            with psycopg.connect(**{**info, "user": "df_scram_probe", "password": "probe-pass-123"}) as c:
+                assert c.execute("SELECT current_user").fetchone() == ("df_scram_probe",)
+        finally:
+            admin.execute("DROP ROLE df_scram_probe")

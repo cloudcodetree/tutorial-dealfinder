@@ -19,7 +19,11 @@ Credentials are read here, from env files, and nowhere else:
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import hmac
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -30,8 +34,23 @@ ROLE = "dealfinder_svc"
 SITE_ENV = Path.home() / "Development" / "cloudcodetree.com" / ".env"
 
 
+def scram_verifier(password: str, *, salt: bytes | None = None, iterations: int = 4096) -> str:
+    """The SCRAM-SHA-256 verifier Postgres stores for `password` (RFC 5802, RFC 7677).
+
+    Postgres accepts a verifier in place of a password and stores it as is, so the
+    plaintext never reaches the server, where log_statement or pgaudit could log the
+    DDL. The tokens here are ASCII, so SASLprep leaves them unchanged."""
+    salt = salt or os.urandom(16)
+    salted = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+    stored_key = hashlib.sha256(client_key).digest()
+    server_key = hmac.new(salted, b"Server Key", hashlib.sha256).digest()
+    b64 = lambda b: base64.b64encode(b).decode()  # noqa: E731
+    return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
+
+
 def role_statements(password: str, *, rotate: bool = False) -> list[sql.Composed]:
-    pw = sql.Literal(password)
+    pw = sql.Literal(scram_verifier(password))
     first = (sql.SQL("ALTER ROLE dealfinder_svc PASSWORD {}").format(pw) if rotate else
              sql.SQL("CREATE ROLE dealfinder_svc LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT PASSWORD {}").format(pw))
     return [first] + [sql.Composed([sql.SQL(s)]) for s in (
