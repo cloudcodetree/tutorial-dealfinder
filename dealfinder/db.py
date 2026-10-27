@@ -66,6 +66,19 @@ def scoped(*, user_id: str | None = None, tenant_id: str = "public",
         yield cur
 
 
+@contextmanager
+def job_scope(*, url: str | None = None) -> Iterator[psycopg.Cursor]:
+    """One transaction as `dealfinder_job`, for scheduled jobs that work across users.
+
+    The role's `job_all` policies grant every row of every dealfinder table, so a
+    job can purge or re-price all users' rows. It is never used on the request
+    path. Both settings are transaction-local, like `scoped()`."""
+    with get_pool(url).connection(timeout=_CHECKOUT_TIMEOUT_S) as conn, conn.transaction(), conn.cursor() as cur:
+        cur.execute("SET LOCAL ROLE dealfinder_job")
+        cur.execute("SET LOCAL search_path = dealfinder, extensions, public")
+        yield cur
+
+
 def ping(url: str | None = None) -> bool:
     """True when the database answers within a few seconds."""
     try:

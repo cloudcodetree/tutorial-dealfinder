@@ -12,8 +12,11 @@ import os
 import time
 
 import jwt
+import psycopg
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from dealfinder import pgstore
 
 _KEYS = [
     "RAPIDAPI_KEY",
@@ -110,3 +113,20 @@ def stub_sources(monkeypatch):
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
     monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
     return fake
+
+
+_OFFER_IDS = ("off-1", "off-2", "acme-1", "bestbuy-77", "ebay-legacy")
+
+
+@pytest.fixture
+def offers(db):
+    """Three catalog offers (two public, one in tenant acme); removes everything the tests made."""
+    pgstore.upsert([{"id": "off-1", "title": "Anker Soundcore Q20i", "source": "BestBuy", "price": 44.99},
+                    {"id": "off-2", "title": "Bose QuietComfort 45", "source": "BestBuy", "price": 46.00}],
+                   None, tenant="public", url=db)
+    pgstore.upsert([{"id": "acme-1", "title": "Acme Only", "source": "BestBuy", "price": 10.0}],
+                   None, tenant="acme", url=db)
+    yield db
+    with psycopg.connect(db) as c:
+        c.execute("delete from dealfinder.watchlist where offer_id = any(%s)", (list(_OFFER_IDS) + ["nope"],))
+        c.execute("delete from dealfinder.offers where id = any(%s)", (list(_OFFER_IDS),))

@@ -2,24 +2,7 @@
 import psycopg
 import pytest
 
-from dealfinder import pgstore, userstore
-
-_IDS = ("off-1", "off-2", "acme-1")
-
-
-@pytest.fixture
-def offers(db):
-    """Three catalog offers (two public, one in tenant acme); removes everything the tests made."""
-    pgstore.upsert([{"id": "off-1", "title": "Anker Soundcore Q20i", "source": "S", "price": 44.99},
-                    {"id": "off-2", "title": "Bose QuietComfort 45", "source": "S", "price": 46.00}],
-                   None, tenant="public", url=db)
-    pgstore.upsert([{"id": "acme-1", "title": "Acme Only", "source": "S", "price": 10.0}],
-                   None, tenant="acme", url=db)
-    yield db
-    with psycopg.connect(db) as c:
-        c.execute("delete from dealfinder.watchlist where offer_id = any(%s)", (list(_IDS) + ["nope"],))
-        c.execute("delete from dealfinder.offers where id = any(%s)", (list(_IDS),))
-
+from dealfinder import userstore
 
 def test_watch_uses_server_price(db, offers):
     row = userstore.add_watch("user-alice", "public", "off-1", target_price=40.0, url=db)
@@ -75,3 +58,11 @@ def test_database_rejects_non_finite_prices(db, offers, clean_saved):
         userstore.add_watch("user-alice", "public", "off-1", target_price=float("inf"), url=db)
     with pytest.raises(psycopg.errors.CheckViolation):
         userstore.add_saved_search("user-alice", "ok", float("nan"), url=db)
+
+
+def test_watch_rejects_a_legacy_unstorablerow(db, offers):
+    with psycopg.connect(db) as c:   # superuser insert, bypassing the upsert guard
+        c.execute("""insert into dealfinder.offers (tenant_id, id, title, source, price)
+                     values ('public', 'ebay-legacy', 'Old', 'eBay:Used', 9)""")
+    with pytest.raises(LookupError):
+        userstore.add_watch("user-alice", "public", "ebay-legacy", None, url=db)
