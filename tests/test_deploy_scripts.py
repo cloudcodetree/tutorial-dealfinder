@@ -5,6 +5,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _load(name):
     spec = importlib.util.spec_from_file_location(name, Path("deploy") / f"{name}.py")
@@ -184,3 +186,80 @@ def test_scram_verifier_lets_the_password_log_in(db):
                 assert c.execute("SELECT current_user").fetchone() == ("df_scram_probe",)
         finally:
             admin.execute("DROP ROLE df_scram_probe")
+
+
+class FakeConn:
+    """psycopg-style: the with-block commits on a clean exit and rolls back on an error."""
+
+    def __init__(self, fail_on=None):
+        self.executed, self.committed, self.rolled_back, self.fail_on = [], False, False, fail_on
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *a):
+        if exc_type:
+            self.rolled_back = True
+        else:
+            self.committed = True
+        return False
+
+    def execute(self, stmt):
+        if self.fail_on and self.fail_on in stmt.as_string(None):
+            import psycopg
+
+            raise psycopg.errors.DuplicateObject('role "dealfinder_svc" already exists')
+        self.executed.append(stmt)
+
+
+class FakeSecrets:
+    def __init__(self, fail=False):
+        self.fail, self.merged = fail, None
+
+    def new_token(self):
+        return "tok"
+
+    def current(self, *, project):
+        return {}
+
+    def merge(self, updates, *, project):
+        if self.fail:
+            raise RuntimeError("versions add failed: reauthentication needed")
+        self.merged = updates
+        return 3
+
+
+def _provision(conn, secrets, pooler=lambda ref, token: "pooler.test", rotate=False):
+    calls = []
+    n = login_mod.provision("postgresql://admin", ref="abcd", token="t", project="p", rotate=rotate,
+                            connect=lambda url, **k: calls.append(url) or conn, pooler=pooler,
+                            secrets_mod=secrets)
+    return n, calls
+
+
+def test_role_change_commits_only_after_the_secret_is_stored():
+    conn, secrets = FakeConn(), FakeSecrets()
+    n, _ = _provision(conn, secrets)
+    assert n == 3 and conn.committed and secrets.merged["DATABASE_URL"].startswith("postgresql://dealfinder_svc.abcd:")
+
+
+def test_a_failed_secret_write_rolls_the_role_change_back():
+    conn = FakeConn()
+    with pytest.raises(RuntimeError, match="reauthentication"):
+        _provision(conn, FakeSecrets(fail=True), rotate=True)
+    assert conn.rolled_back and not conn.committed
+
+
+def test_lookups_that_can_fail_run_before_any_ddl():
+    def pooler(ref, token):
+        raise RuntimeError("pooler lookup failed: HTTP 401")
+
+    conn = FakeConn()
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        n, calls = _provision(conn, FakeSecrets(), pooler=pooler)
+    assert conn.executed == []
+
+
+def test_creating_an_existing_role_points_at_rotate():
+    with pytest.raises(RuntimeError, match="--rotate"):
+        _provision(FakeConn(fail_on="CREATE ROLE"), FakeSecrets())

@@ -88,6 +88,29 @@ def _secrets_module():
     return mod
 
 
+def provision(admin: str, *, ref: str, token: str, project: str, rotate: bool,
+              connect, pooler=_pooler_host, secrets_mod=None) -> int:
+    """Set the role's password and store the matching DATABASE_URL, or change neither.
+
+    Every lookup that can fail (the pooler host, reading the stored secret) runs
+    before any DDL. The role change then runs in one open transaction, the secret
+    is written, and only then does the transaction commit. A failed secret write
+    rolls the password back, so Postgres and dealfinder-env never disagree."""
+    secrets_mod = secrets_mod or _secrets_module()
+    host = pooler(ref, token)
+    secrets_mod.current(project=project)
+    password = secrets_mod.new_token()
+    import psycopg
+
+    with connect(admin, autocommit=False) as conn:
+        try:
+            for stmt in role_statements(password, rotate=rotate):
+                conn.execute(stmt)
+        except psycopg.errors.DuplicateObject:
+            raise RuntimeError(f"{ROLE} already exists: re-run with --rotate to set a new password") from None
+        return secrets_mod.merge({"DATABASE_URL": pooler_url(ref, host, password)}, project=project)
+
+
 def main(argv: list[str] | None = None) -> int:
     from dotenv import dotenv_values
     import psycopg
@@ -107,14 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(f"✗ missing: {', '.join(missing)}", file=sys.stderr)
         return 1
-
-    deploy_secrets = _secrets_module()
-    password = deploy_secrets.new_token()
-    with psycopg.connect(admin, autocommit=False) as conn:
-        for stmt in role_statements(password, rotate=args.rotate):
-            conn.execute(stmt)
-    host = _pooler_host(ref, token)
-    n = deploy_secrets.merge({"DATABASE_URL": pooler_url(ref, host, password)}, project=args.project)
+    try:
+        n = provision(admin, ref=ref, token=token, project=args.project, rotate=args.rotate,
+                      connect=psycopg.connect)
+    except RuntimeError as exc:
+        print(f"✗ {exc}. Postgres is unchanged.", file=sys.stderr)
+        return 1
     print(f"✓ {ROLE} ready, DATABASE_URL stored in dealfinder-env v{n}")
     return 0
 
