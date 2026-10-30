@@ -263,3 +263,32 @@ def test_lookups_that_can_fail_run_before_any_ddl():
 def test_creating_an_existing_role_points_at_rotate():
     with pytest.raises(RuntimeError, match="--rotate"):
         _provision(FakeConn(fail_on="CREATE ROLE"), FakeSecrets())
+
+
+def test_push_refuses_to_run_without_the_env_file(capsys, monkeypatch, tmp_path):
+    # Run from the wrong directory, push would store only the generated tokens and
+    # drop every real key without a word.
+    monkeypatch.chdir(tmp_path)
+    called = []
+    monkeypatch.setattr(secrets_mod, "current", lambda **k: called.append("current") or {})
+    monkeypatch.setattr(secrets_mod, "push", lambda payload, **k: called.append("push") or 1)
+    assert secrets_mod.main(["push", "--project", "p"]) == 1
+    assert called == [] and "companion" in capsys.readouterr().err
+
+
+def test_readme_first_deploy_order():
+    import re
+
+    text = Path("deploy/gcp/README.md").read_text()
+    steps = [r"-target=google_secret_manager_secret\.env", r"python -m dealfinder\.migrate",
+             r"python deploy/secrets\.py push", r"python deploy/create_login_role\.py",
+             r"^\s*tofu -chdir=deploy/gcp apply -var-file=prod\.tfvars$", r"BACKEND_ORIGIN",
+             r"npx wrangler deploy", r"python deploy/secrets\.py edge", r"gh variable set CLOUDFLARE_ACCOUNT_ID",
+             r"Merge the branch to `main`"]
+    at = []
+    for s in steps:
+        m = re.search(s, text, re.M)
+        assert m, s
+        at.append(m.start())
+    assert at == sorted(at), dict(zip(steps, at))
+    assert "cd deploy/gcp" not in text and "../secrets.py" not in text

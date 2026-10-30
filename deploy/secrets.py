@@ -106,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name).add_argument("--project", required=True)
     args = ap.parse_args(argv)
 
+    if args.cmd in ("check", "push") and not Path(".env").exists():
+        # From the wrong directory a push would store only the generated tokens and
+        # silently drop every real key.
+        print("✗ no .env here. Run from the companion repo root, the folder that holds your .env.",
+              file=sys.stderr)
+        return 1
+
     if args.cmd == "check":
         have = _env_file()
         for k in KEYS:
