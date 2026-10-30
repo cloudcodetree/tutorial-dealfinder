@@ -26,3 +26,5 @@ scripts/
 course/
 *.md
 !README.md
+# The credentials file google-github-actions/auth writes into the workspace.
+gha-creds-*.json

@@ -39,3 +39,32 @@ def test_deploy_runs_only_on_a_push_to_main_after_both_test_jobs():
     assert set(deploy["needs"]) == {"test", "edge"}
     assert deploy["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
     assert deploy["permissions"] == {"contents": "read", "id-token": "write"}
+
+
+def _deploy_steps():
+    return yaml.safe_load(Path(".github/workflows/ci.yml").read_text())["jobs"]["deploy"]["steps"]
+
+
+def _index(steps, needle):
+    for i, s in enumerate(steps):
+        if needle in (s.get("run", "") + s.get("uses", "") + s.get("name", "")):
+            return i
+    raise AssertionError(f"no step with {needle!r}")
+
+
+def test_deploy_refuses_the_placeholder_backend_before_anything_ships():
+    steps = _deploy_steps()
+    guard = _index(steps, "backend-not-deployed.invalid")
+    assert guard < _index(steps, "docker build") and guard < _index(steps, "wrangler deploy")
+
+
+def test_cloud_credentials_never_reach_npm_install_scripts():
+    deploy = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())["jobs"]["deploy"]
+    assert "CLOUDFLARE_API_TOKEN" not in deploy.get("env", {})
+    steps = deploy["steps"]
+    wrangler = steps[_index(steps, "wrangler deploy")]
+    assert "CLOUDFLARE_API_TOKEN" in wrangler.get("env", {})
+    auth = _index(steps, "google-github-actions/auth")
+    installs = [i for i, s in enumerate(steps) if "npm ci" in s.get("run", "")]
+    assert installs and all(i < auth for i in installs)
+    assert "gha-creds-*.json" in Path(".dockerignore").read_text().split()
