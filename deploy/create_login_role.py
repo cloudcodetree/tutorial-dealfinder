@@ -10,10 +10,10 @@ are USAGE on the schema and SELECT on `schema_migrations`, which `/readyz` reads
 before any role is set.
 
 Credentials are read here, from the site's env file (`--site-env`), and nowhere else:
-- the admin connection, through `deploy/prod_db.py` (SUPABASE_DIRECT_CON_STRING plus
+- the admin connection, through `deploy/prod_db.py` (the session pooler, with
   SUPABASE_DB_PASSWORD, TLS verify-full against Supabase's CA)
-- the Supabase Management token and project ref: SUPABASE_ACCESS_TOKEN and
-  SUPABASE_PROJECT_ID
+- the Supabase personal token (the sbp_ value under SUPABASE_ACCESS_TOKEN or
+  GOOGLE_ACCESS_TOKEN) and the project ref SUPABASE_PROJECT_ID
 """
 
 from __future__ import annotations
@@ -67,18 +67,7 @@ def pooler_url(ref: str, host: str, password: str) -> str:
 
 
 def _pooler_host(ref: str, token: str) -> str:
-    import httpx
-
-    r = httpx.get(f"https://api.supabase.com/v1/projects/{ref}/config/database/pooler",
-                  headers={"Authorization": f"Bearer {token}"}, timeout=20)
-    if r.status_code != 200:
-        raise RuntimeError(f"pooler lookup failed: HTTP {r.status_code}")
-    rows = r.json()
-    rows = rows if isinstance(rows, list) else [rows]
-    for row in rows:
-        if row.get("pool_mode") == "transaction" or row.get("database_type") == "PRIMARY":
-            return row["db_host"]
-    raise RuntimeError("pooler lookup returned no primary pooler")
+    return _prod_db().pooler_host(ref, token)
 
 
 def _load(name: str):
@@ -130,8 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     site = dotenv_values(args.site_env) if args.site_env.exists() else {}
-    ref, token = site.get("SUPABASE_PROJECT_ID"), site.get("SUPABASE_ACCESS_TOKEN")
-    missing = [n for n, v in (("SUPABASE_PROJECT_ID", ref), ("SUPABASE_ACCESS_TOKEN", token)) if not v]
+    ref, token = site.get("SUPABASE_PROJECT_ID"), _prod_db().management_token(site)
+    missing = [n for n, v in (("SUPABASE_PROJECT_ID", ref),
+                              ("an sbp_ token in SUPABASE_ACCESS_TOKEN or GOOGLE_ACCESS_TOKEN", token)) if not v]
     if missing:
         print(f"✗ missing from the site's env file: {', '.join(missing)}", file=sys.stderr)
         return 1

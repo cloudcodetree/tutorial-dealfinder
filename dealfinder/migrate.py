@@ -43,9 +43,14 @@ def _applied(conn) -> set[str]:
 
 
 def pending(url: str | None = None) -> list[str]:
-    """Migration files not yet recorded as applied, in run order."""
+    """Migration files not yet recorded as applied, in run order.
+
+    A database with no log table has applied nothing, so every file is pending."""
     with psycopg.connect(_url(url), connect_timeout=8) as conn:
-        done = _applied(conn)
+        try:
+            done = _applied(conn)
+        except psycopg.errors.UndefinedTable:
+            done = set()
     return [f for f in _files() if f not in done]
 
 

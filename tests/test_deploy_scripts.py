@@ -296,10 +296,14 @@ def test_readme_first_deploy_order():
 
 def test_login_role_takes_the_admin_connection_from_the_site_env(monkeypatch, tmp_path, capsys):
     site = tmp_path / "site.env"
-    site.write_text("SUPABASE_PROJECT_ID=abcd\nSUPABASE_ACCESS_TOKEN=tok\n")
+    site.write_text("SUPABASE_PROJECT_ID=abcd\nGOOGLE_ACCESS_TOKEN=sbp_tok\n")
     seen = {}
 
     class FakeProdDb:
+        @staticmethod
+        def management_token(site):
+            return site.get("GOOGLE_ACCESS_TOKEN")
+
         @staticmethod
         def _admin(site_env):
             seen["site_env"] = site_env
@@ -310,4 +314,4 @@ def test_login_role_takes_the_admin_connection_from_the_site_env(monkeypatch, tm
     monkeypatch.chdir(tmp_path)
     assert login_mod.main(["--project", "p", "--site-env", str(site)]) == 0
     assert seen["site_env"] == site and "verify-full" in seen["admin"] and seen["ref"] == "abcd"
-    assert "tok" not in capsys.readouterr().out
+    assert seen["token"] == "sbp_tok" and "sbp_tok" not in capsys.readouterr().out
