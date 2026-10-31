@@ -53,3 +53,11 @@ def test_production_env_runs_best_buy_only_in_check_mode(TF):
     assert re.search(r'name\s*=\s*"DEALFINDER_ENV"\s*\n\s*value\s*=\s*"production"', TF)
     assert re.search(r'name\s*=\s*"DEALFINDER_SOURCES"\s*\n\s*value\s*=\s*"BestBuy"', TF)
     assert re.search(r'variable "verdict_mode"\s*{[^}]*default\s*=\s*"check"', TF)
+
+
+def test_public_without_an_allusers_grant(TF):
+    # The cloudcodetree.com organization's domain-restricted-sharing policy refuses
+    # allUsers ("do not belong to a permitted customer"). Cloud Run's invoker IAM
+    # check is turned off instead, and the edge guard stays the access control.
+    assert not re.search(r'member\s*=\s*"allUsers"', TF)
+    assert re.search(r"invoker_iam_disabled\s*=\s*true", TF)

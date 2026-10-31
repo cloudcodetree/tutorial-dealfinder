@@ -3,6 +3,10 @@ resource "google_cloud_run_v2_service" "api" {
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
+  # Public without an allUsers grant, which the organization's domain-restricted-
+  # sharing policy refuses. The Worker cannot mint Google ID tokens cheaply, so the
+  # backend's edge guard (EDGE_SHARED_SECRET) is the access control instead.
+  invoker_iam_disabled = true
 
   template {
     service_account                  = google_service_account.run.email
@@ -70,13 +74,4 @@ resource "google_cloud_run_v2_service" "api" {
   }
 
   depends_on = [google_project_service.apis, google_secret_manager_secret_iam_member.run_reads_env]
-}
-
-# Public: the Worker cannot mint Google ID tokens cheaply, so the backend's edge
-# guard (EDGE_SHARED_SECRET) is the access control instead.
-resource "google_cloud_run_v2_service_iam_member" "public" {
-  name     = google_cloud_run_v2_service.api.name
-  location = google_cloud_run_v2_service.api.location
-  role     = "roles/run.invoker"
-  member   = "allUsers"
 }
