@@ -65,3 +65,19 @@ def test_every_rls_table_has_a_job_policy(db):
             where n.nspname = 'dealfinder' and c.relrowsecurity and not exists (select 1 from pg_policy p
             where p.polrelid = c.oid and 'dealfinder_job'::regrole = any(p.polroles))""").fetchall()
     assert missing == []
+
+
+def test_pending_on_a_database_never_migrated_lists_every_file(db):
+    # Production's first migration starts from a database with no dealfinder schema.
+    # A dry run there must list every file, not crash on the missing log table.
+    info = psycopg.conninfo.conninfo_to_dict(db)
+    with psycopg.connect(db, autocommit=True) as admin:
+        admin.execute("DROP DATABASE IF EXISTS df_never_migrated")
+        admin.execute("CREATE DATABASE df_never_migrated")
+    try:
+        fresh = psycopg.conninfo.make_conninfo(**{**info, "dbname": "df_never_migrated"})
+        assert migrate.pending(fresh) == sorted(p.name for p in migrate.MIGRATIONS_DIR.glob("*.sql"))
+        assert migrate.schema_ready(fresh) is False
+    finally:
+        with psycopg.connect(db, autocommit=True) as admin:
+            admin.execute("DROP DATABASE df_never_migrated")

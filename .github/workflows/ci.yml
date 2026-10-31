@@ -33,10 +33,79 @@ jobs:
       - run: python -m dealfinder.run_evals   # quality gate — fails the build on regression
       - run: ruff check .
 
-  deploy:
-    needs: test
-    if: github.ref == 'refs/heads/main'
+  # The deals Worker (edge/): unit tests and a typecheck on every push and PR.
+  edge:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge
     steps:
       - uses: actions/checkout@v4
-      - run: echo "build the Docker image and push to your registry / PaaS here"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: edge/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+
+  # Production deploy: main only, after both test jobs. GitHub mints a short-lived
+  # OIDC token and Workload Identity Federation trades it for the deploy service
+  # account (deploy/gcp/wif.tf), so no Google key exists anywhere. Every value
+  # reaches the shell through env:, never through an expression inside run:.
+  # Package installs and the front-end build run before any cloud credential
+  # exists, and the Cloudflare token is set on the one step that needs it, so no
+  # npm install script can read either.
+  deploy:
+    needs: [test, edge]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT }}/dealfinder/api:${{ github.sha }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      # A Worker pointed at the placeholder answers 503 on every /api call.
+      - name: refuse the placeholder backend
+        run: |
+          if grep -q 'backend-not-deployed.invalid' edge/wrangler.jsonc; then
+            echo "::error::set BACKEND_ORIGIN in edge/wrangler.jsonc (deploy/gcp/README.md, step 6)"
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: npm ci
+        working-directory: edge
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      # The GitHub Actions cache keeps the dependency and model layers identical from
+      # one deploy to the next, so the registry stores them once.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+      - run: gcloud run deploy dealfinder-api --image "$IMAGE" --region us-central1 --project "$GCP_PROJECT"
+      - name: deploy the Worker
+        run: npx wrangler deploy
+        working-directory: edge
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_EDGE_TOKEN }}
+      - name: smoke check through the Worker
+        run: curl -fsS https://deals.cloudcodetree.com/api/health && curl -fsS https://deals.cloudcodetree.com/api/readyz

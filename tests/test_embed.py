@@ -114,3 +114,33 @@ def test_embed_texts_cached_embeds_each_text_once(monkeypatch, fresh_embed_cache
     monkeypatch.setattr(embed, "_now", lambda: start + embed.EMBED_CACHE_TTL_S + 1)
     embed.embed_texts_cached(["a"])
     assert seen[-1] == "a"
+
+
+def test_model_dir_is_honored(monkeypatch):
+    # The production image bakes the model into DEALFINDER_MODEL_DIR so a cold start
+    # never downloads it.
+    seen = {}
+
+    class Fake:
+        def __init__(self, name, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr("fastembed.TextEmbedding", Fake)
+    monkeypatch.setattr(embed, "_model", None)
+    monkeypatch.setenv("DEALFINDER_MODEL_DIR", "/opt/models")
+    embed._get_model()
+    assert seen["cache_dir"] == "/opt/models"
+
+
+def test_no_model_dir_keeps_the_default_cache(monkeypatch):
+    seen = {}
+
+    class Fake:
+        def __init__(self, name, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr("fastembed.TextEmbedding", Fake)
+    monkeypatch.setattr(embed, "_model", None)
+    monkeypatch.delenv("DEALFINDER_MODEL_DIR", raising=False)
+    embed._get_model()
+    assert "cache_dir" not in seen
