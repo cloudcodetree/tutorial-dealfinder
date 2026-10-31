@@ -21,10 +21,12 @@ import statistics
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from typing import Callable
 
 GATE_S = 10.0
+USER_AGENT = "dealfinder-coldstart/1"
 
 
 def measure(base: str, *, runs: int, redeploy: Callable[[], None], wait: Callable[[], None],
@@ -54,13 +56,21 @@ def report(runs: list[tuple[float, float]]) -> int:
     return 0
 
 
-def _get(url: str) -> None:
-    # /readyz may answer 503 while the schema is pending. Its timing still counts.
+def _get(url: str, *, opener: Callable = urllib.request.urlopen) -> None:
+    # Cloudflare answers Python's default User-Agent with 403 (error 1010), which
+    # times the block page instead of the app, so the request names itself and any
+    # status but 200 fails the run. /readyz may answer 503 while the schema is
+    # pending. Its timing still counts.
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(url, timeout=60) as r:
+        with opener(req, timeout=60) as r:
             r.read()
+            status = r.status
     except urllib.error.HTTPError as e:
         e.read()
+        status = e.code
+    if status not in ({200, 503} if url.endswith("/readyz") else {200}):
+        raise RuntimeError(f"GET {url} answered {status}")
 
 
 def main(argv: list[str] | None = None) -> int:
