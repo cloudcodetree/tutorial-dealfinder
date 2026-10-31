@@ -9,11 +9,11 @@ means it has no table rights of its own: every query runs inside `db.scoped` or
 are USAGE on the schema and SELECT on `schema_migrations`, which `/readyz` reads
 before any role is set.
 
-Credentials are read here, from env files, and nowhere else:
-- the admin connection: MIGRATION_DATABASE_URL, else SUPABASE_DIRECT_CON_STRING,
-  from the companion's `.env` in the current directory
+Credentials are read here, from the site's env file (`--site-env`), and nowhere else:
+- the admin connection, through `deploy/prod_db.py` (SUPABASE_DIRECT_CON_STRING plus
+  SUPABASE_DB_PASSWORD, TLS verify-full against Supabase's CA)
 - the Supabase Management token and project ref: SUPABASE_ACCESS_TOKEN and
-  SUPABASE_PROJECT_ID, from the site's env file (`--site-env`)
+  SUPABASE_PROJECT_ID
 """
 
 from __future__ import annotations
@@ -81,11 +81,19 @@ def _pooler_host(ref: str, token: str) -> str:
     raise RuntimeError("pooler lookup returned no primary pooler")
 
 
-def _secrets_module():
-    spec = importlib.util.spec_from_file_location("deploy_secrets", Path(__file__).with_name("secrets.py"))
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(f"deploy_{name}", Path(__file__).with_name(f"{name}.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _prod_db():
+    return _load("prod_db")
+
+
+def _secrets_module():
+    return _load("secrets")
 
 
 def provision(admin: str, *, ref: str, token: str, project: str, rotate: bool,
@@ -121,14 +129,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--site-env", type=Path, default=SITE_ENV)
     args = ap.parse_args(argv)
 
-    local = dotenv_values(Path(".env")) if Path(".env").exists() else {}
-    admin = local.get("MIGRATION_DATABASE_URL") or local.get("SUPABASE_DIRECT_CON_STRING")
     site = dotenv_values(args.site_env) if args.site_env.exists() else {}
     ref, token = site.get("SUPABASE_PROJECT_ID"), site.get("SUPABASE_ACCESS_TOKEN")
-    missing = [n for n, v in (("MIGRATION_DATABASE_URL or SUPABASE_DIRECT_CON_STRING", admin),
-                              ("SUPABASE_PROJECT_ID", ref), ("SUPABASE_ACCESS_TOKEN", token)) if not v]
+    missing = [n for n, v in (("SUPABASE_PROJECT_ID", ref), ("SUPABASE_ACCESS_TOKEN", token)) if not v]
     if missing:
-        print(f"✗ missing: {', '.join(missing)}", file=sys.stderr)
+        print(f"✗ missing from the site's env file: {', '.join(missing)}", file=sys.stderr)
+        return 1
+    try:
+        admin = _prod_db()._admin(args.site_env)
+    except RuntimeError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
         return 1
     try:
         n = provision(admin, ref=ref, token=token, project=args.project, rotate=args.rotate,

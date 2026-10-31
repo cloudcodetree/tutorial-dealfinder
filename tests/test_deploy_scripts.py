@@ -280,7 +280,7 @@ def test_readme_first_deploy_order():
     import re
 
     text = Path("deploy/gcp/README.md").read_text()
-    steps = [r"-target=google_secret_manager_secret\.env", r"python -m dealfinder\.migrate",
+    steps = [r"-target=google_secret_manager_secret\.env", r"python deploy/prod_db\.py migrate --dry-run",
              r"python deploy/secrets\.py push", r"python deploy/create_login_role\.py",
              r"^\s*tofu -chdir=deploy/gcp apply -var-file=prod\.tfvars$", r"BACKEND_ORIGIN",
              r"npx wrangler deploy", r"python deploy/secrets\.py edge", r"gh variable set CLOUDFLARE_ACCOUNT_ID",
@@ -292,3 +292,22 @@ def test_readme_first_deploy_order():
         at.append(m.start())
     assert at == sorted(at), dict(zip(steps, at))
     assert "cd deploy/gcp" not in text and "../secrets.py" not in text
+
+
+def test_login_role_takes_the_admin_connection_from_the_site_env(monkeypatch, tmp_path, capsys):
+    site = tmp_path / "site.env"
+    site.write_text("SUPABASE_PROJECT_ID=abcd\nSUPABASE_ACCESS_TOKEN=tok\n")
+    seen = {}
+
+    class FakeProdDb:
+        @staticmethod
+        def _admin(site_env):
+            seen["site_env"] = site_env
+            return "postgresql://admin@db.abcd.supabase.co/postgres?sslmode=verify-full"
+
+    monkeypatch.setattr(login_mod, "_prod_db", lambda: FakeProdDb)
+    monkeypatch.setattr(login_mod, "provision", lambda admin, **k: seen.update(admin=admin, **k) or 5)
+    monkeypatch.chdir(tmp_path)
+    assert login_mod.main(["--project", "p", "--site-env", str(site)]) == 0
+    assert seen["site_env"] == site and "verify-full" in seen["admin"] and seen["ref"] == "abcd"
+    assert "tok" not in capsys.readouterr().out

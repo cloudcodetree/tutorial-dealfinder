@@ -39,16 +39,19 @@ tofu -chdir=deploy/gcp plan -var-file=prod.tfvars
    tofu -chdir=deploy/gcp apply -var-file=prod.tfvars -target=google_secret_manager_secret.env -target=google_secret_manager_secret_iam_member.run_reads_env
    ```
 2. The schema, which also creates the `dealfinder_app` and `dealfinder_job` roles.
-   `.env` must hold `MIGRATION_DATABASE_URL`, the shared project's admin connection.
-   Without it the migrator falls back to `DATABASE_URL`, your local database:
+   `deploy/prod_db.py` takes the shared project's admin connection from the site's
+   env file only, with TLS verified against Supabase's CA, so a local `.env` can
+   never redirect it. List what is pending, then apply:
    ```bash
-   python -m dealfinder.migrate
+   python deploy/prod_db.py migrate --dry-run
+   python deploy/prod_db.py migrate
    ```
 3. The secret's first version, from the keys in `.env` (names printed, never values):
    ```bash
    python deploy/secrets.py push --project <project_id>
    ```
-4. The login role and the production `DATABASE_URL`:
+4. The login role and the production `DATABASE_URL`. It reads the admin connection
+   the same way, plus the Supabase Management token for the pooler host:
    ```bash
    python deploy/create_login_role.py --project <project_id>
    ```
