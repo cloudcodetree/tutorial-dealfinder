@@ -335,3 +335,20 @@ def test_push_without_an_env_file_needs_the_explicit_flag(monkeypatch, tmp_path,
     assert secrets_mod.main(["push", "--project", "p", "--no-env-file"]) == 0
     assert set(sent) == {"EDGE_SHARED_SECRET", "UNSUBSCRIBE_SECRET"}
     assert sent["EDGE_SHARED_SECRET"] not in capsys.readouterr().out
+
+
+def test_old_versions_are_found_without_a_server_side_filter():
+    # Secret Manager rejected `--filter=state:(ENABLED OR DISABLED)` ("syntax error ...
+    # token ','"), so states are read from the listing and filtered here.
+    class Listing(FakeRun):
+        def __call__(self, argv, input=None, **kw):
+            proc = super().__call__(argv, input=input, **kw)
+            if argv[:4] == ["gcloud", "secrets", "versions", "list"]:
+                assert not any(a.startswith("--filter") for a in argv)
+                proc = subprocess.CompletedProcess(argv, 0, "3\tenabled\n2\tdisabled\n1\tdestroyed\n", "")
+            return proc
+
+    fake = Listing(versions=["2", "1"])
+    assert secrets_mod.push('{"A":"v"}', project="p", run=fake) == 3
+    destroyed = {c.argv[4] for c in fake.calls if c.argv[:4] == ["gcloud", "secrets", "versions", "destroy"]}
+    assert destroyed == {"2"}

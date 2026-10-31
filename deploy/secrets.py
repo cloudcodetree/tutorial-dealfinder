@@ -67,11 +67,15 @@ def push(payload: str, *, project: str, run=subprocess.run) -> int:
                                "--project", project, "--format=value(name.basename())"],
                          stdin=payload), "versions add")
     new = int(out.strip().rsplit("/", 1)[-1])
+    # States are filtered here: Secret Manager rejects an OR filter on state.
     listed = _check(_gcloud(run, ["gcloud", "secrets", "versions", "list", SECRET, "--project", project,
-                                  "--filter=state:(ENABLED OR DISABLED)",
-                                  "--format=value(name.basename())"]), "versions list")
-    for v in listed.split():
-        if v != str(new):
+                                  "--format=value(name.basename(),state)"]), "versions list")
+    for line in listed.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        v, state = parts[0], (parts[1].lower() if len(parts) > 1 else "enabled")
+        if v != str(new) and state != "destroyed":
             _check(_gcloud(run, ["gcloud", "secrets", "versions", "destroy", v, "--secret", SECRET,
                                  "--project", project, "--quiet"]), f"destroy v{v}")
     return new
