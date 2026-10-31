@@ -41,7 +41,7 @@ app = FastAPI(title="DealFinder")
 # Per-instance limits for the anonymous routes (ratelimit.LIMITS). Module-level so
 # tests can swap in a fresh one.
 _limiter = ratelimit.Limiter()
-_EDGE_EXEMPT = ("/healthz", "/readyz")
+_EDGE_EXEMPT = ("/healthz", "/health", "/readyz")
 
 
 @app.middleware("http")
@@ -151,8 +151,12 @@ def _warm_embed_model() -> None:
 
 
 @app.get("/healthz")
+@app.get("/health")
 def healthz():
-    """Liveness: the process answers. Never touches the database."""
+    """Liveness: the process answers. Never touches the database.
+
+    /health is the same check under a path Cloud Run serves: its front end
+    reserves /healthz and answers it with Google's own 404."""
     return {"status": "ok"}
 
 

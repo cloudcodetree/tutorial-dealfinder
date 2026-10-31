@@ -6,9 +6,9 @@
 Each run forces a new revision (a COLDSTART_NONCE env var), so no instance of the
 old one can answer. A deploy starts one instance of its own to pass the readiness
 check, and Cloud Run keeps an idle instance for up to 15 minutes, so the script
-then waits --idle-s seconds (default 960) before it times the first GET /healthz
-and the first GET /readyz, request to last byte. That makes each run about 16
-minutes. It prints every run and the median, and exits 1 if any cold /healthz
+then waits --idle-s seconds (default 960) before it times the first GET /health
+and the first GET /readyz, request to last byte. (Cloud Run reserves /healthz.) That makes each run about 16
+minutes. It prints every run and the median, and exits 1 if any cold /health
 took more than 10 s.
 
 Stdlib only. The gcloud call is read-write on the service (a new revision with the
@@ -34,7 +34,7 @@ def measure(base: str, *, runs: int, redeploy: Callable[[], None], wait: Callabl
         redeploy()
         wait()
         timings = []
-        for route in ("healthz", "readyz"):
+        for route in ("health", "readyz"):
             start = clock()
             get(f"{base}/{route}")
             timings.append(clock() - start)
@@ -44,12 +44,12 @@ def measure(base: str, *, runs: int, redeploy: Callable[[], None], wait: Callabl
 
 def report(runs: list[tuple[float, float]]) -> int:
     for i, (h, r) in enumerate(runs, 1):
-        print(f"run {i}: healthz {h:.1f}s readyz {r:.1f}s")
-    print(f"median: healthz {statistics.median(h for h, _ in runs):.1f}s "
+        print(f"run {i}: health {h:.1f}s readyz {r:.1f}s")
+    print(f"median: health {statistics.median(h for h, _ in runs):.1f}s "
           f"readyz {statistics.median(r for _, r in runs):.1f}s")
     slow = [h for h, _ in runs if h > GATE_S]
     if slow:
-        print(f"✗ a cold /healthz took {max(slow):.1f}s, over the {GATE_S:.0f}s gate")
+        print(f"✗ a cold /health took {max(slow):.1f}s, over the {GATE_S:.0f}s gate")
         return 1
     return 0
 

@@ -664,3 +664,11 @@ def test_rate_limit_returns_429_with_retry_after(monkeypatch, stub_sources):
     assert [r.status_code for r in responses[:5]] == [200] * 5 and responses[5].status_code == 429
     assert responses[5].json() == {"detail": "slow down"}
     assert int(responses[5].headers["Retry-After"]) >= 1
+
+
+def test_health_alias_answers_without_the_edge_header(monkeypatch):
+    # Cloud Run's front end reserves /healthz and answers it with Google's own 404, so
+    # probes through the Worker use /health.
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    r = client.get("/health")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}

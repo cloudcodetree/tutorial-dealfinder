@@ -40,13 +40,13 @@ def test_each_run_redeploys_waits_out_the_warm_instance_then_times_both_routes()
     events, clock, redeploy, wait, get = _fakes([(4.0, 0.5), (5.0, 0.4)])
     runs = coldstart.measure("https://x/api", runs=2, redeploy=redeploy, wait=wait, get=get, clock=clock)
     assert [pytest.approx(r) for r in runs] == [(4.0, 0.5), (5.0, 0.4)]
-    assert events == ["redeploy", "wait", "healthz", "readyz"] * 2
+    assert events == ["redeploy", "wait", "health", "readyz"] * 2
 
 
 def test_report_prints_each_run_and_the_median(capsys):
     assert coldstart.report([(4.0, 0.5), (6.0, 0.7), (5.0, 0.4)]) == 0
     out = capsys.readouterr().out
-    assert "run 1: healthz 4.0s readyz 0.5s" in out and "median: healthz 5.0s readyz 0.5s" in out
+    assert "run 1: health 4.0s readyz 0.5s" in out and "median: health 5.0s readyz 0.5s" in out
 
 
 def test_a_cold_healthz_over_10s_fails():

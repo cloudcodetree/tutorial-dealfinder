@@ -68,3 +68,8 @@ def test_cloud_credentials_never_reach_npm_install_scripts():
     installs = [i for i, s in enumerate(steps) if "npm ci" in s.get("run", "")]
     assert installs and all(i < auth for i in installs)
     assert "gha-creds-*.json" in Path(".dockerignore").read_text().split()
+
+
+def test_smoke_check_avoids_the_path_cloud_run_reserves():
+    smoke = _deploy_steps()[_index(_deploy_steps(), "smoke check")]["run"]
+    assert "/api/health " in smoke + " " and "/api/healthz" not in smoke and "/api/readyz" in smoke
