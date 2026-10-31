@@ -89,7 +89,16 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@v2
       - run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-      - run: docker build -t "$IMAGE" . && docker push "$IMAGE"
+      # The GitHub Actions cache keeps the dependency and model layers identical from
+      # one deploy to the next, so the registry stores them once.
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - run: gcloud run deploy dealfinder-api --image "$IMAGE" --region us-central1 --project "$GCP_PROJECT"
       - name: deploy the Worker
         run: npx wrangler deploy

@@ -93,3 +93,60 @@ def test_default_mode_unchanged(monkeypatch, tmp_path):
     for k in ("DEALFINDER_ENABLE_PAID_SOURCES", "OPENROUTER_MODELS", "APIFY_TOKEN", "FIRECRAWL_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     assert cost_check.main([]) == 0
+
+
+def test_a_project_without_the_scheduler_api_has_no_jobs(fake_gcloud):
+    # gcloud's live wording: "API [cloudscheduler.googleapis.com] not enabled on project".
+    inner = fake_gcloud
+
+    def run(argv, **kw):
+        if "scheduler" in argv and "locations" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "API [cloudscheduler.googleapis.com] not enabled on "
+                                               "project [dealfinder-prod-x]. Would you like to enable and retry")
+        return inner(argv, **kw)
+
+    checks = cost_check.live_report(project="dealfinder-prod-x", run=run)
+    jobs = _check(checks, "scheduler jobs on the billing account")
+    assert jobs.value == 0 and jobs.ok
+
+
+def test_every_gcloud_call_is_non_interactive(fake_gcloud):
+    # A live run hung on gcloud's "enable this API? (y/N)" prompt waiting for stdin.
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv, kw.get("stdin")))
+        return fake_gcloud(argv, **kw)
+
+    cost_check.live_report(project="dealfinder-prod-x", run=run)
+    assert seen and all("--quiet" in argv and stdin is subprocess.DEVNULL for argv, stdin in seen)
+
+
+def test_a_long_disabled_api_error_is_still_recognized(fake_gcloud):
+    # The live message names the account and project first, so "has not been used"
+    # sits past the 200 characters an error line keeps.
+    long_err = ("ERROR: (gcloud.scheduler.locations.list) [chris@cloudcodetree.com] does not have permission to access "
+                "projects instance [dealfinder-prod-x] (or it may not exist): " + "detail " * 30 +
+                "Cloud Scheduler API has not been used in project dealfinder-prod-x before or it is disabled.")
+    assert long_err.find("has not been used") > 200
+
+    def run(argv, **kw):
+        if "scheduler" in argv and "locations" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", long_err)
+        return fake_gcloud(argv, **kw)
+
+    jobs = _check(cost_check.live_report(project="dealfinder-prod-x", run=run), "scheduler jobs on the billing account")
+    assert jobs.value == 0 and jobs.ok
+
+
+def test_registry_size_falls_back_to_the_image_list_when_the_field_is_missing(fake_gcloud):
+    # Live, `repositories describe` left sizeBytes out, and the check read that as 0.
+    fake_gcloud.state["size"] = ""
+
+    def run(argv, **kw):
+        if "docker" in argv and "images" in argv:
+            return subprocess.CompletedProcess(argv, 0, "1409\n297861942\n", "")
+        return fake_gcloud(argv, **kw)
+
+    size = _check(cost_check.live_report(project="dealfinder-prod-x", run=run), "artifact registry bytes")
+    assert size.value == 297863351 and size.ok

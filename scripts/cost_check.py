@@ -58,10 +58,19 @@ SCHEDULER_FREE_JOBS = 3              # per billing account, not per project
 SECRET_FREE_VERSIONS = 6
 
 
+class GcloudError(RuntimeError):
+    """A failed gcloud call. The message keeps 200 characters, `stderr` keeps all of it."""
+
+    def __init__(self, what: str, stderr: str) -> None:
+        super().__init__(f"gcloud {what} failed: {stderr.strip()[:200]}")
+        self.stderr = stderr
+
+
 def _gcloud(run, *args: str) -> str:
-    proc = run(["gcloud", *args], capture_output=True, text=True)
+    # --quiet and no stdin: gcloud may offer to enable an API and would wait for an answer.
+    proc = run(["gcloud", *args, "--quiet"], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if proc.returncode != 0:
-        raise RuntimeError(f"gcloud {args[0]} {args[1]} failed: {proc.stderr.strip()[:200]}")
+        raise GcloudError(f"{args[0]} {args[1]}", proc.stderr)
     return proc.stdout
 
 
@@ -70,8 +79,8 @@ def _scheduler_jobs(run, project: str) -> int:
     try:
         locations = _gcloud(run, "scheduler", "locations", "list", "--project", project,
                             "--format=value(locationId)").split()
-    except RuntimeError as exc:
-        if "SERVICE_DISABLED" in str(exc) or "has not been used" in str(exc):
+    except GcloudError as exc:
+        if any(s in exc.stderr for s in ("SERVICE_DISABLED", "has not been used", "not enabled on project")):
             return 0
         raise
     return sum(len(_gcloud(run, "scheduler", "jobs", "list", "--project", project, "--location", loc,
@@ -102,8 +111,16 @@ def live_report(*, project: str, run=subprocess.run) -> list[Check]:
     checks.append(Check("secret versions active", versions, SECRET_FREE_VERSIONS,
                         versions <= SECRET_FREE_VERSIONS))
 
-    size = int(_gcloud(run, "artifacts", "repositories", "describe", "dealfinder", "--location", REGION,
-                       "--project", project, "--format=value(sizeBytes)").strip() or 0)
+    raw = _gcloud(run, "artifacts", "repositories", "describe", "dealfinder", "--location", REGION,
+                  "--project", project, "--format=value(sizeBytes)").strip()
+    if raw:
+        size = int(raw)
+    else:
+        # The API can leave sizeBytes out. Adding up the images can only overstate storage,
+        # because images that share layers count them twice, so the check errs toward failing.
+        images = _gcloud(run, "artifacts", "docker", "images", "list",
+                         f"{REGION}-docker.pkg.dev/{project}/dealfinder", "--format=value(metadata.imageSizeBytes)")
+        size = sum(int(x) for x in images.split() if x.isdigit())
     checks.append(Check("artifact registry bytes", size, REGISTRY_MAX_BYTES, size <= REGISTRY_MAX_BYTES))
 
     number = _gcloud(run, "projects", "describe", project, "--format=value(projectNumber)").strip()

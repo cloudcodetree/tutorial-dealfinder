@@ -2,16 +2,21 @@
 # Two stages. The build stage installs the core dependencies (no dev, torch,
 # mlflow or prefect extras) and bakes the embedding model in, so a cold start
 # never downloads it. The runtime stage copies only what the service needs and
-# runs as a non-root user.
+# runs as a non-root user. The app runs from its source in /app, so the venv
+# holds dependencies only.
 FROM python:3.11-slim AS build
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1 DEALFINDER_MODEL_DIR=/opt/models
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 WORKDIR /src
-COPY pyproject.toml README.md ./
-COPY dealfinder/ dealfinder/
-RUN pip install --no-cache-dir .
-RUN python -c "from dealfinder.embed import warm; warm()"
+# Neither heavy layer depends on the source, so a code change rebuilds only the
+# small COPY layers below and the registry keeps one copy of these across deploys.
+# The dependencies, read from pyproject.toml: this layer changes only when they do.
+COPY pyproject.toml ./
+RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))" > requirements.txt \
+ && pip install --no-cache-dir -r requirements.txt
+# The embedding model, by the name dealfinder/embed.py loads (test_deploy pins it).
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/opt/models')"
 
 FROM python:3.11-slim
 ENV PATH=/opt/venv/bin:$PATH

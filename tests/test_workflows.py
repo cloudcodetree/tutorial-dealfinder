@@ -55,7 +55,7 @@ def _index(steps, needle):
 def test_deploy_refuses_the_placeholder_backend_before_anything_ships():
     steps = _deploy_steps()
     guard = _index(steps, "backend-not-deployed.invalid")
-    assert guard < _index(steps, "docker build") and guard < _index(steps, "wrangler deploy")
+    assert guard < _index(steps, "docker/build-push-action") and guard < _index(steps, "wrangler deploy")
 
 
 def test_cloud_credentials_never_reach_npm_install_scripts():
@@ -73,3 +73,10 @@ def test_cloud_credentials_never_reach_npm_install_scripts():
 def test_smoke_check_avoids_the_path_cloud_run_reserves():
     smoke = _deploy_steps()[_index(_deploy_steps(), "smoke check")]["run"]
     assert "/api/health " in smoke + " " and "/api/healthz" not in smoke and "/api/readyz" in smoke
+
+
+def test_ci_reuses_image_layers_between_deploys():
+    steps = _deploy_steps()
+    build = steps[_index(steps, "docker/build-push-action")]
+    assert build["with"]["cache-from"] == "type=gha" and build["with"]["cache-to"] == "type=gha,mode=max"
+    assert build["with"]["push"] is True
