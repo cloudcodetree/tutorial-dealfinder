@@ -27,7 +27,7 @@ build-backend = "setuptools.build_meta"
 packages = ["dealfinder"]
 
 [tool.setuptools.package-data]
-dealfinder = ["static/*.html", "migrations/*.sql"]
+dealfinder = ["static/*.html", "migrations/*.sql", "certs/*.crt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

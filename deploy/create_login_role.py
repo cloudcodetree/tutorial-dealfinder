@@ -61,9 +61,15 @@ def role_statements(password: str, *, rotate: bool = False) -> list[sql.Composed
     )]
 
 
+# Supabase's public root CA, shipped in the image (dealfinder/certs/). verify-full against
+# it is proven on the pooler host by `deploy/prod_db.py migrate --dry-run`.
+IMAGE_CA = "/app/dealfinder/certs/supabase-prod-ca-2021.crt"
+
+
 def pooler_url(ref: str, host: str, password: str) -> str:
-    """The transaction pooler (port 6543). Supavisor names the tenant in the user."""
-    return f"postgresql://{ROLE}.{ref}:{quote(password, safe='')}@{host}:6543/postgres?sslmode=require"
+    """The transaction pooler (port 6543), TLS verify-full. Supavisor names the tenant in the user."""
+    return (f"postgresql://{ROLE}.{ref}:{quote(password, safe='')}@{host}:6543/postgres"
+            f"?sslmode=verify-full&sslrootcert={quote(IMAGE_CA, safe='')}")
 
 
 def _pooler_host(ref: str, token: str) -> str:

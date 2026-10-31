@@ -118,10 +118,18 @@ def test_rotate_alters_instead_of_creating():
     assert text.startswith("ALTER ROLE dealfinder_svc") and "CREATE ROLE" not in text
 
 
-def test_pooler_url_uses_the_transaction_pooler():
+def test_pooler_url_uses_the_transaction_pooler_with_verified_tls():
     url = login_mod.pooler_url("abcd", "aws-0-us-east-1.pooler.supabase.com", "p@ss/word")
     assert url == ("postgresql://dealfinder_svc.abcd:p%40ss%2Fword@aws-0-us-east-1.pooler.supabase.com"
-                   ":6543/postgres?sslmode=require")
+                   ":6543/postgres?sslmode=verify-full&sslrootcert=%2Fapp%2Fdealfinder%2Fcerts%2Fsupabase-prod-ca-2021.crt")
+
+
+def test_the_image_carries_the_ca_the_url_names():
+    # The Dockerfile copies dealfinder/ to /app/dealfinder, so this file is the one the URL names.
+    ca = Path("dealfinder/certs/supabase-prod-ca-2021.crt")
+    assert ca.read_text().startswith("-----BEGIN CERTIFICATE-----")
+    assert "COPY dealfinder/ dealfinder/" in Path("Dockerfile").read_text()
+    assert login_mod.IMAGE_CA == "/app/" + str(ca)
 
 
 FAKE_GCLOUD = """#!/bin/sh
