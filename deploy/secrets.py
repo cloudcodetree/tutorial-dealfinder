@@ -7,7 +7,7 @@ version stays active, inside Secret Manager's free 6.
 
     python deploy/secrets.py check                 # which keys the env file holds, names only
     python deploy/secrets.py push --project P      # env file keys, merged over what is stored
-    python deploy/secrets.py edge --project P      # the stored edge secret -> the Worker
+    python deploy/secrets.py edge --project P      # the stored edge secret -> the staging Worker
 
 Values travel on stdin, never in argv, so they never show in a process list.
 The env file is the companion's `.env` in the current directory, read here and
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     subprocess.run(["npx", "wrangler", "secret", "put", "EDGE_SHARED_SECRET"], input=edge, text=True,
                    cwd="edge", check=True, capture_output=True)
-    print("✓ EDGE_SHARED_SECRET set on dealfinder-edge")
+    print("✓ EDGE_SHARED_SECRET set on dealfinder-edge-staging")
     return 0
 
 

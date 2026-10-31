@@ -1,9 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dealfinder-edge",
+  // Staging, and the only environment until launch: every deploy, CI's included,
+  // reaches deals.beta.cloudcodetree.com and nothing else. Plan 8 adds env.production
+  // for the launch hostname, the same split as the site's cct-site-staging.
+  "name": "dealfinder-edge-staging",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-20",
-  "routes": [{ "pattern": "deals.cloudcodetree.com", "custom_domain": true }],
+  "routes": [{ "pattern": "deals.beta.cloudcodetree.com", "custom_domain": true }],
   // The Worker runs first for every path, so the security headers and the
   // pre-launch noindex reach static assets too.
   "assets": {

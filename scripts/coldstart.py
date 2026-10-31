@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure DealFinder's cold start on Cloud Run: the first request after scale-to-zero.
 
-    python scripts/coldstart.py --base https://deals.cloudcodetree.com/api --project P --runs 3
+    python scripts/coldstart.py --base https://deals.beta.cloudcodetree.com/api --project P --runs 3
 
 Each run forces a new revision (a COLDSTART_NONCE env var), so no instance of the
 old one can answer. A deploy starts one instance of its own to pass the readiness

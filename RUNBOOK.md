@@ -217,17 +217,22 @@ moved. **Action:** open a retrain review; drift alone isn't an outage, but stale
 
 ---
 
-## 8. The live product: deals.cloudcodetree.com
+## 8. The live product: deals.beta.cloudcodetree.com until launch
 
 Sections 1 to 7 describe the course stack. This section is the one real deployment.
-It costs $0 a month by design (`COST.md`, Tier 3). At launch there is no Best Buy key,
-so the live routes are `/api/check`, the lab and the health checks.
+It costs $0 a month by design (`COST.md`, Tier 3). There is no Best Buy key yet, so
+the live routes are `/api/check`, the lab and the health checks.
+
+Until launch the product runs only on the staging host `deals.beta.cloudcodetree.com`,
+noindexed. `deals.cloudcodetree.com` has no DNS record. Plan 8 adds a production
+environment to `edge/wrangler.jsonc` for it, deployed to the Worker named
+`dealfinder-edge`, which exists today with no domain.
 
 ### Service map
 
 | Piece | What it is | Where |
 |---|---|---|
-| Edge | Worker `dealfinder-edge` on the custom domain, serves `frontend/dist` and proxies `/api/*` | `edge/src/index.ts`, `edge/wrangler.jsonc` |
+| Edge | Worker `dealfinder-edge-staging` on `deals.beta.cloudcodetree.com`, serves `frontend/dist` and proxies `/api/*` | `edge/src/index.ts`, `edge/wrangler.jsonc` |
 | API | Cloud Run service `dealfinder-api`, project `dealfinder-prod-cct`, `us-central1`, 0 to 2 instances | `deploy/gcp/run.tf` |
 | Secrets | Secret Manager `dealfinder-env`, one JSON object, expanded at startup | `deploy/secrets.py`, `dealfinder/settings.py` |
 | Database | the `dealfinder` schema in Supabase `cct-demos`, login role `dealfinder_svc` through the transaction pooler, TLS verify-full | `deploy/create_login_role.py`, `deploy/prod_db.py` |
@@ -239,8 +244,8 @@ The API is reachable only through the Worker. Every request without the
 ### Health checks
 
 ```bash
-curl -fsS https://deals.cloudcodetree.com/api/health    # {"status":"ok"}
-curl -fsS https://deals.cloudcodetree.com/api/readyz    # {"db":"ok","schema":"current"}
+curl -fsS https://deals.beta.cloudcodetree.com/api/health    # {"status":"ok"}
+curl -fsS https://deals.beta.cloudcodetree.com/api/readyz    # {"db":"ok","schema":"current"}
 python scripts/cost_check.py --live --project dealfinder-prod-cct   # every check ✓
 ```
 
@@ -252,7 +257,8 @@ python scripts/cost_check.py --live --project dealfinder-prod-cct   # every chec
 ### Cold start
 
 The first request after scale-to-zero, measured with `scripts/coldstart.py` through
-the Worker on 2026-10-31, 3 runs:
+the Worker on 2026-10-31, 3 runs. The Worker then served `deals.cloudcodetree.com`.
+The backend is the same one beta uses now:
 
 | Run | `/health` | `/readyz` |
 |---|---|---|
@@ -293,7 +299,7 @@ green while the old code serves. Return to the newest revision with `--to-latest
 in place of `--to-revisions`. The registry
 keeps only the 2 newest images, so a rollback reaches one image back.
 
-The Worker, from `edge/`:
+The Worker, from `edge/`. Its config names `dealfinder-edge-staging`:
 ```bash
 npx wrangler deployments list
 npx wrangler rollback <VERSION_ID>
@@ -317,6 +323,6 @@ npx wrangler rollback <VERSION_ID>
 
 ### Teardown
 
-`COST.md`, Teardown section D: `tofu destroy`, `wrangler delete`, then
+`COST.md`, Teardown section D: `tofu destroy`, `wrangler delete` for both Workers, then
 `DROP ROLE dealfinder_svc;` as the database admin. The `dealfinder` schema and its
 two group roles stay in the shared project until you drop them too.

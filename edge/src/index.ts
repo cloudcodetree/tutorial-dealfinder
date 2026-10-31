@@ -1,4 +1,5 @@
-// dealfinder-edge: the Worker that owns deals.cloudcodetree.com.
+// dealfinder-edge: the Worker in front of DealFinder. Until launch it runs only as
+// dealfinder-edge-staging on deals.beta.cloudcodetree.com (wrangler.jsonc).
 //
 //   /api/*   -> the Cloud Run backend with /api stripped. Anonymous GET /api/search
 //               is edge-cached 300 s. The LLM routes and the SSE stream are limited here.
@@ -26,7 +27,6 @@ export function routeOf(pathname: string): Route {
   return 'assets';
 }
 
-const SITE = 'https://deals.cloudcodetree.com';
 const SEARCH_TTL_S = 300;
 // The routes that can call an LLM share the hardest limit, as in the app (ratelimit.LIMITS).
 const ASK_PATHS = new Set(['/api/ask', '/api/ask_agentic', '/api/review']);
@@ -42,10 +42,11 @@ function searchQuery(url: URL): string {
 
 /** The edge-cache key for an anonymous search. Tracking parameters never split the
  *  cache, and the backend is sent exactly this query, so what is cached under a key
- *  is always the answer to that key. */
+ *  is always the answer to that key. The host is part of the key: beta and production
+ *  share the zone's cache, and must never share an answer. */
 export function searchCacheKey(url: URL): string | null {
   if (url.pathname !== '/api/search') return null;
-  return `${SITE}/api/search${searchQuery(url)}`;
+  return `${url.origin}/api/search${searchQuery(url)}`;
 }
 
 // Percent-encoding, a doubled slash or a backslash in a proxied path is never a real

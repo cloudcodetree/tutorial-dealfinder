@@ -63,7 +63,7 @@ note its free-tier ceiling, and add its teardown line to your own checklist.
 
 ---
 
-## Tier 3 — the live product at deals.cloudcodetree.com
+## Tier 3 — the live product (deals.beta.cloudcodetree.com until launch)
 
 The real deployment, separate from the course: you never need it to learn. It is
 designed to cost **$0 a month**, and every component below has a free allowance, a
@@ -79,7 +79,7 @@ without Best Buy").
 | Artifact Registry `dealfinder` | 0.5 GB storage ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | one image is 297 MB in the registry (297,449,999 bytes, measured 2026-10-31); two versions share the dependency and model layers | cleanup policy keeps the 2 newest images; `cost_check --live` fails above 450 MB | `tofu -chdir=deploy/gcp destroy` |
 | Cloud Logging | 50 GiB per project a month ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | megabytes | one short JSON line per request | removed with the project |
 | Budget alert | free | 1 budget at $1 | emails at 50%, 90%, 100% and a 100% forecast | `tofu -chdir=deploy/gcp destroy` |
-| Worker `dealfinder-edge` | 100,000 requests a day on Workers Free ([pricing](https://developers.cloudflare.com/workers/platform/pricing/)) | every page view and API call is one request | edge cache for anonymous search, rate limits on the LLM routes | `npx wrangler delete dealfinder-edge` (in `edge/`) |
+| Workers `dealfinder-edge-staging` (beta host) and `dealfinder-edge` (no domain until launch) | 100,000 requests a day per account on Workers Free ([pricing](https://developers.cloudflare.com/workers/platform/pricing/)) | every page view and API call is one request | edge cache for anonymous search, rate limits on the LLM routes | `npx wrangler delete <name>` for each (in `edge/`) |
 | Supabase `cct-demos` (shared with cloudcodetree.com) | 500 MB database on the free plan ([pricing](https://supabase.com/pricing)) | no visitor data at launch | own `dealfinder` schema; Best Buy rows purged before 72 hours once a key exists | `DROP ROLE dealfinder_svc` (see `RUNBOOK.md`) |
 | Best Buy API | 50,000 calls a day, no billing | not used at launch | no key yet | none |
 | Healthchecks.io | 20 checks on Hobbyist | not used at launch | Plan 5 adds the uptime check | none |
@@ -126,7 +126,7 @@ running/billable resource.
 ### D. Decommission the live product (Tier 3)
 ```bash
 tofu -chdir=deploy/gcp destroy -var-file=prod.tfvars   # Cloud Run, the secret, the registry, WIF, the budget
-cd edge && npx wrangler delete dealfinder-edge          # the Worker and its custom domain
+cd edge && npx wrangler delete dealfinder-edge-staging && npx wrangler delete dealfinder-edge   # the Workers and their custom domains
 # then, as the database admin, in the shared project:
 #   DROP ROLE dealfinder_svc;
 ```

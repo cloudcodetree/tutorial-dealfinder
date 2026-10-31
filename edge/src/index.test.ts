@@ -10,7 +10,7 @@ let backend: (req: Request) => Response | Promise<Response>;
 
 const ctx = () => ({ waitUntil: (p: Promise<unknown>) => waited.push(p) }) as unknown as ExecutionContext;
 const call = (path: string, init?: RequestInit) =>
-  worker.fetch(new Request('https://deals.cloudcodetree.com' + path, init), env, ctx());
+  worker.fetch(new Request('https://deals.beta.cloudcodetree.com' + path, init), env, ctx());
 const lastFetch = () => sent[sent.length - 1];
 
 beforeEach(() => {
@@ -64,7 +64,15 @@ describe('dealfinder-edge', () => {
     expect(second.headers.get('X-DealFinder-Cache')).toBe('HIT');
     expect(sent.length).toBe(1);
     expect(searchCacheKey(new URL('https://x/api/search?q=TV&k=5&utm=y'))).toBe(
-      'https://deals.cloudcodetree.com/api/search?k=5&q=tv');
+      'https://x/api/search?k=5&q=tv');
+  });
+
+  it('keys the cache by host, so beta and production never share an answer', () => {
+    // Both hosts live in the cloudcodetree.com zone, and the Cache API is per zone.
+    const beta = searchCacheKey(new URL('https://deals.beta.cloudcodetree.com/api/search?q=tv'));
+    const prod = searchCacheKey(new URL('https://deals.cloudcodetree.com/api/search?q=tv'));
+    expect(beta).toBe('https://deals.beta.cloudcodetree.com/api/search?k=12&q=tv');
+    expect(beta).not.toBe(prod);
   });
 
   it('authorized search bypasses the edge cache', async () => {

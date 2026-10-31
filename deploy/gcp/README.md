@@ -62,7 +62,9 @@ tofu -chdir=deploy/gcp plan -var-file=prod.tfvars
 6. Point the Worker at the service. Copy `tofu -chdir=deploy/gcp output -raw api_url`
    into `BACKEND_ORIGIN` in `edge/wrangler.jsonc` and commit it on the branch. The
    deploy job refuses to ship the placeholder.
-7. The Worker's first deploy, which creates it and its custom domain:
+7. The Worker's first deploy, which creates `dealfinder-edge-staging` and its custom
+   domain `deals.beta.cloudcodetree.com`. No config reaches `deals.cloudcodetree.com`
+   before launch:
    ```bash
    (cd frontend && npm ci && npm run build) && (cd edge && npm ci && npx wrangler deploy)
    ```

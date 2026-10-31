@@ -75,6 +75,12 @@ def test_smoke_check_avoids_the_path_cloud_run_reserves():
     assert "/api/health " in smoke + " " and "/api/healthz" not in smoke and "/api/readyz" in smoke
 
 
+def test_smoke_check_targets_the_beta_host_before_launch():
+    smoke = _deploy_steps()[_index(_deploy_steps(), "smoke check")]["run"]
+    assert "https://deals.beta.cloudcodetree.com/api/health" in smoke
+    assert "https://deals.cloudcodetree.com" not in smoke
+
+
 def test_ci_reuses_image_layers_between_deploys():
     steps = _deploy_steps()
     build = steps[_index(steps, "docker/build-push-action")]

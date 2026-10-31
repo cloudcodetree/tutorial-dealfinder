@@ -108,4 +108,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_EDGE_TOKEN }}
       - name: smoke check through the Worker
-        run: curl -fsS https://deals.cloudcodetree.com/api/health && curl -fsS https://deals.cloudcodetree.com/api/readyz
+        run: curl -fsS https://deals.beta.cloudcodetree.com/api/health && curl -fsS https://deals.beta.cloudcodetree.com/api/readyz
