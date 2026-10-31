@@ -80,3 +80,11 @@ def test_ci_reuses_image_layers_between_deploys():
     build = steps[_index(steps, "docker/build-push-action")]
     assert build["with"]["cache-from"] == "type=gha" and build["with"]["cache-to"] == "type=gha,mode=max"
     assert build["with"]["push"] is True
+
+
+def test_ci_pushes_a_single_manifest():
+    # With provenance on, each push stored an index, a ~300 MB manifest and an
+    # attestation. Deleting the tag left the manifest behind, and the keep-2 cleanup
+    # policy counts each digest as a version.
+    steps = _deploy_steps()
+    assert steps[_index(steps, "docker/build-push-action")]["with"]["provenance"] is False

@@ -99,6 +99,7 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
       - run: gcloud run deploy dealfinder-api --image "$IMAGE" --region us-central1 --project "$GCP_PROJECT"
       - name: deploy the Worker
         run: npx wrangler deploy
