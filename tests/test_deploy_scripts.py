@@ -323,3 +323,15 @@ def test_login_role_takes_the_admin_connection_from_the_site_env(monkeypatch, tm
     assert login_mod.main(["--project", "p", "--site-env", str(site)]) == 0
     assert seen["site_env"] == site and "verify-full" in seen["admin"] and seen["ref"] == "abcd"
     assert seen["token"] == "sbp_tok" and "sbp_tok" not in capsys.readouterr().out
+
+
+def test_push_without_an_env_file_needs_the_explicit_flag(monkeypatch, tmp_path, capsys):
+    # With no keys to send yet, a push still has to store the generated tokens. The
+    # flag says so on purpose, so a mistaken directory never drops keys silently.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(secrets_mod, "current", lambda **k: {})
+    sent = {}
+    monkeypatch.setattr(secrets_mod, "push", lambda payload, **k: sent.update(json.loads(payload)) or 1)
+    assert secrets_mod.main(["push", "--project", "p", "--no-env-file"]) == 0
+    assert set(sent) == {"EDGE_SHARED_SECRET", "UNSUBSCRIBE_SECRET"}
+    assert sent["EDGE_SHARED_SECRET"] not in capsys.readouterr().out

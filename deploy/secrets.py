@@ -104,13 +104,15 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check")
     for name in ("push", "edge"):
         sub.add_parser(name).add_argument("--project", required=True)
+    sub.choices["push"].add_argument("--no-env-file", action="store_true",
+                                     help="no .env exists yet: store only the generated tokens")
     args = ap.parse_args(argv)
 
-    if args.cmd in ("check", "push") and not Path(".env").exists():
+    if args.cmd in ("check", "push") and not Path(".env").exists() and not getattr(args, "no_env_file", False):
         # From the wrong directory a push would store only the generated tokens and
         # silently drop every real key.
-        print("✗ no .env here. Run from the companion repo root, the folder that holds your .env.",
-              file=sys.stderr)
+        print("✗ no .env here. Run from the companion repo root, the folder that holds your .env, "
+              "or pass --no-env-file to store only the generated tokens.", file=sys.stderr)
         return 1
 
     if args.cmd == "check":
