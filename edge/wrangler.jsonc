@@ -19,7 +19,7 @@
   ],
   "vars": {
     // Task 12 sets this from `tofu -chdir=deploy/gcp output -raw api_url`.
-    "BACKEND_ORIGIN": "https://backend-not-deployed.invalid",
+    "BACKEND_ORIGIN": "https://dealfinder-api-hhpo3lei6q-uc.a.run.app",
     "LAUNCHED": "false"
   },
   // Invocation logs stay off, so no URL with query text is ever logged (site precedent).
