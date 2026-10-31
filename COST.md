@@ -17,7 +17,7 @@ Nothing here bills you. This isn't a promise, it's how the code is wired:
 | What | Why it's free | Where it's enforced |
 |---|---|---|
 | **LLM calls** | Default model tier is **free-only** (`:free` OpenRouter models). With **no** `OPENROUTER_API_KEY` set, the app degrades to deterministic logic — no LLM at all. | `dealfinder/llm.py` (`models()` returns `:free` tier; `available()` gates on the key) |
-| **Live sources** | Works on keyless/free tiers alone (iTunes keyless, eBay official API, RapidAPI/BestBuy free tiers), and falls back to the frozen snapshot with **zero** keys. | `dealfinder/live_sources.py`, `aggregate.py` |
+| **Live sources** | Each source needs its own free key (Best Buy, eBay, RapidAPI; iTunes is keyless). Without keys, `/search` can return no results: it has no snapshot fallback. Production runs Best Buy only (`DEALFINDER_SOURCES=BestBuy`), inside its free 50,000 calls a day. | `dealfinder/live_sources.py`, `aggregate.py` |
 | **Paid sources stay OFF** | Apify, Amazon, Firecrawl are `metered=True` and require **both** an API key **and** `DEALFINDER_ENABLE_PAID_SOURCES=1`. Neither is set by default. | `live_sources.py` `_paid_ok()` |
 | **Database & compute** | Local pgvector + FastAPI + Vite in Docker Compose on your machine. No cloud, no bill. | `docker-compose.yml` |
 

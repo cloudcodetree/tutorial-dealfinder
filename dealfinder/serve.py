@@ -17,20 +17,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, migrate, pgstore
+from . import db, licensing, migrate, pgstore, shop
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
 from .dealscore import fair_price
 from .features import featurize
 from .ingest import dedup_key
-from .live_sources import LIVE_SOURCES
+from .live_sources import EBAY, enabled_sources
 from .rag import _category_models, _load_medians
 from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
@@ -84,10 +84,6 @@ def _maybe_recheck_db() -> None:
     _DB_CHECKED_AT = time.monotonic()
     _DB = _db_ready()
 
-
-def _embed_texts(texts):
-    from .embed import embed_texts
-    return embed_texts(texts)
 
 _catalog = load_catalog()
 _idx = {p.id: i for i, p in enumerate(_catalog)}
@@ -163,67 +159,42 @@ def readyz():
     return JSONResponse(_READY[2], status_code=_READY[1])
 
 
+# A shopper's search text: 1-200 characters after trimming, no NUL byte.
+SearchText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200,
+                                              pattern=r"^[^\x00]+$")]
+
+
 @app.get("/search")
-def search(q: str, who: Principal = Depends(current_principal)):
-    """Aggregate live deals across sources; persist + embed them under the caller's
-    tenant when a DB is set (RLS keeps each tenant's history private)."""
-    result = aggregate(q)
-    if _DB and result["results"]:
-        try:
-            texts = [f"{r['title']} {r.get('brand') or ''}".strip() for r in result["results"]]
-            pgstore.upsert(result["results"], _embed_texts(texts), tenant=who.tenant_id)
-            result["persisted"] = pgstore.count(tenant=who.tenant_id)
-            result["tenant"] = who.tenant_id
-        except Exception:
-            pass
+def search(q: SearchText, request: Request, response: Response, background: BackgroundTasks,
+           k: Annotated[int, Query(ge=1, le=24)] = 12, who: Principal = Depends(current_principal)):
+    """The shopper search: Best Buy rows with verdicts where the store allows them,
+    eBay listings in their own unrated box, and the store attribution.
+
+    An anonymous response is the same for everyone, so the edge may cache it for
+    five minutes. A signed-in one is never cached, and neither is a degraded one
+    (a store did not answer), so one slow call never blanks a query for minutes."""
+    result = shop.shop_search(q, k)
+    background.add_task(_remember_offers, result["results"], who.tenant_id)
+    if "authorization" in request.headers:
+        response.headers["Cache-Control"] = "private, no-store"
+    elif result["degraded"]:
+        response.headers["Cache-Control"] = "no-store"
+    else:
+        response.headers["Cache-Control"] = "public, max-age=300"
     return result
 
 
-def _peer_fair_prices(offers: list[dict]) -> dict[int, float]:
-    """Category-agnostic fallback fair price: each offer's fair price is the median
-    price of its k nearest SEMANTIC neighbors within this result set.
-
-    Embed every offer's title once, then for offer i take the median price of its
-    most-similar peers. This gives a second signal for ANY search (not just the
-    electronics the trained models cover): an item far cheaper than its close peers
-    is suspicious, while one cheap-but-consistent-with-its-peers is a genuine deal.
-    It's the graceful-degradation layer under the trained per-category model.
-    Returns {index: peer_fair}; offers with too few neighbors are omitted."""
-    if len(offers) < 3:
-        return {}
-    try:
-        import numpy as np
-
-        embs = np.asarray(_embed_texts([o["title"] for o in offers]), dtype=float)
-        embs /= np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9
-        sims = embs @ embs.T
-        prices = np.array([float(o["price"]) for o in offers])
-        out: dict[int, float] = {}
-        for i in range(len(offers)):
-            nbrs = [j for j in np.argsort(-sims[i]) if j != i][:5]
-            if len(nbrs) >= 2:
-                out[i] = float(np.median(prices[nbrs]))
-        return out
-    except Exception:
-        return {}
+# A product name for Check a deal: 3-200 characters after trimming, no NUL byte.
+CheckTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200,
+                                              pattern=r"^[^\x00]+$")]
 
 
-def _deal_reason(verdict, m, rf, fair, basis) -> str:
-    """The human-readable 'why' for a verdict — domain copy lives here (backend),
-    not in the page, so the UI only displays it."""
-    if verdict is None:
-        return "Ranked by value only — too few similar offers to estimate a fair price."
-    pct = round(m * 100)
-    src = "the price model" if basis == "model" else "similar offers"
-    ref = f"~${fair:.0f}" if fair else "the estimate"
-    if verdict == "deal":
-        return f"{pct}% under the median and consistent with {src} ({ref}) — a genuine deal."
-    if verdict == "suspicious":
-        return (f"Looks {pct}% under the median, but far below {src} ({ref}) — "
-                "too good to be true (likely an accessory or a mislisting).")
-    if verdict == "overpriced":
-        return f"Above the market median and above {src} ({ref})."
-    return f"Near the market median and {src} ({ref})."
+@app.get("/check")
+def check(title: CheckTitle, price: Annotated[float, Query(gt=0, le=50_000, allow_inf_nan=False)]):
+    """Check a deal: rate one price the shopper found for a product, using the
+    price model trained on the teaching snapshot. No live store is called, so it
+    works in both verdict modes."""
+    return shop.check_deal(title, price)
 
 
 @app.get("/ranked")
@@ -242,66 +213,19 @@ def ranked(q: str, background: BackgroundTasks, k: int = 12,
          (guitars, cookware, …) still gets a real second signal;
       3. value-only (`verdict=null`) only when there are too few offers to compare.
     Ranked by value, with too-good-to-be-true (suspicious) and overpriced demoted."""
-    from .dealscore import (
-        SUSPICIOUS_RESIDUAL_FRAC,
-        median_signal,
-        render_badge,
-        residual_fraction,
-    )
-    from .extract import guess_category
-    from .features import featurize
-    from .schema import Product
+    from .dealscore import SUSPICIOUS_RESIDUAL_FRAC
 
     result = aggregate(q)
     offers = result.get("results", [])
-    median = result.get("median_price") or 0.0
-    peer_fair = _peer_fair_prices(offers)
-
-    scored = []
-    for i, r in enumerate(offers):
-        price = float(r["price"])
-        m = median_signal(price, median) if median else 0.0
-        cat = guess_category(r["title"])
-        model = _cat_models.get(cat) if cat else None
-        fair = basis = None
-        if model is not None:
-            p = Product(id=r["id"], title=r["title"], brand=r.get("brand"),
-                        category=cat, price=price, url=r.get("url") or "",
-                        source=r.get("source") or "live")
-            fair, basis = float(fair_price(model, featurize(p))), "model"
-        elif i in peer_fair and peer_fair[i] > 0:
-            fair, basis = peer_fair[i], "peers"
-        verdict = rf = None
-        if fair is not None:
-            rf = residual_fraction(price, fair)
-            verdict = render_badge(m, rf).lower()   # deal / suspicious / fair / overpriced
-        scored.append({
-            "id": r["id"], "title": r["title"], "brand": r.get("brand"),
-            "price": round(price, 2), "source": r.get("source"),
-            "verdict": verdict,
-            "pct_under_median": round(m * 100, 1),
-            "fair": round(fair, 2) if fair is not None else None,
-            "residual_frac": round(rf, 3) if rf is not None else None,
-            "basis": basis,               # "model" | "peers" | None (value-only)
-            "category": cat,
-            "reason": _deal_reason(verdict, m, rf, fair, basis),
-            "url": r.get("url"), "image_url": r.get("image_url"),
-        })
-
-    def _value(x):
-        s = (x["pct_under_median"] or 0) / 100.0
-        if x["verdict"] == "suspicious":
-            return s - 1.0        # too-good-to-be-true sinks below genuine deals
-        if x["verdict"] == "overpriced":
-            return s - 0.5
-        return s
-    scored.sort(key=_value, reverse=True)
-    scored = scored[:k]
+    rated = [float(r["price"]) for r in offers if licensing.may_verdict(r.get("source", ""))]
+    median = statistics.median(rated) if rated else 0.0
+    scored = shop.score_offers(offers, median)[:k]
     background.add_task(_remember_offers, scored, who.tenant_id)   # after the response: a shown deal can be watched
     return {
         "query": q,
         "count": len(scored),
-        "median_price": round(median, 2),
+        "median_price": None if shop.verdict_mode() == "check" else round(median, 2),
+        "attribution": shop.attribution_for(scored),
         "sources_live": result.get("sources_live", []),
         "residual_threshold": SUSPICIOUS_RESIDUAL_FRAC,   # domain constant, not hardcoded in the UI
         "modeled": sum(1 for x in scored if x["basis"] == "model"),
@@ -349,7 +273,18 @@ def _remember_offers(results: list[dict], tenant: str) -> None:
     if not _DB or not results:
         return
     try:
-        pgstore.upsert(results, None, tenant=tenant)
+        # Embed only the rows the license allows; the titles were just embedded
+        # while scoring, so these are cache hits.
+        embeddable = [i for i, r in enumerate(results) if licensing.may_embed(r.get("source", ""))]
+        if shop.verdict_mode() == "check":   # check mode embeds nothing
+            embeddable = []
+        embs = None
+        if embeddable:
+            vecs = shop._embed_texts([results[i]["title"] for i in embeddable])
+            embs = [None] * len(results)
+            for i, v in zip(embeddable, vecs):
+                embs[i] = v
+        pgstore.upsert(results, embs, tenant=tenant)
     except Exception:
         logging.getLogger("dealfinder").warning("could not remember %d offers", len(results), exc_info=True)
 
@@ -449,7 +384,7 @@ def _stream_search(query: str, sources):
     snapshot-backed stub in tests).
     """
     seen: dict[str, object] = {}
-    for src in sources:
+    for src in sources:   # rows a store's terms forbid mixing are dropped before anything else
         try:
             if not src.available():
                 continue
@@ -462,16 +397,23 @@ def _stream_search(query: str, sources):
             continue
         batch = []
         for p in found:
+            if not licensing.may_comingle(p.source):
+                continue
             k = dedup_key(p)
             if k not in seen or p.price < seen[k].price:
                 seen[k] = p
             batch.append({"id": p.id, "title": p.title, "price": p.price,
                           "source": p.source, "url": p.url, "image_url": p.image_url})
-        yield _sse("results", {"source": getattr(src, "name", "?"), "results": batch})
+        if batch:
+            yield _sse("results", {"source": getattr(src, "name", "?"), "results": batch})
 
     items = list(seen.values())
-    median = round(statistics.median([p.price for p in items]), 2) if items else 0.0
-    yield _sse("done", {"query": query, "count": len(items), "median_price": median})
+    rated = [p.price for p in items if licensing.may_verdict(p.source)]
+    median = round(statistics.median(rated), 2) if rated else 0.0
+    if shop.verdict_mode() == "check":   # a market median is a price signal too
+        median = None
+    yield _sse("done", {"query": query, "count": len(items), "median_price": median,
+                        "attribution": shop.attribution_for([{"source": p.source} for p in items])})
 
 
 @app.get("/search/stream")
@@ -483,7 +425,7 @@ def search_stream(q: str):
     sources as `/search`; runs live with the learner's own source keys, and
     still streams from whatever sources are available offline."""
     return StreamingResponse(
-        _stream_search(q, LIVE_SOURCES),
+        _stream_search(q, enabled_sources()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -499,7 +441,7 @@ def semantic(q: str, k: int = 12, who: Principal = Depends(current_principal)):
     offline, the same way ``/ask`` does. Each result carries its two-signal deal
     verdict so the UI can badge DEAL/SUSPICIOUS."""
     if _DB:
-        rows = pgstore.semantic_search(_embed_texts([q])[0], k=k, tenant=who.tenant_id)
+        rows = pgstore.semantic_search(shop._embed_texts([q])[0], k=k, tenant=who.tenant_id)
         for r in rows:
             r["similarity"] = round(float(r["similarity"]), 3)
         return {"query": q, "count": len(rows), "results": rows,
@@ -1319,8 +1261,9 @@ def dataset_report():
 
 @app.get("/sources")
 def sources():
-    """Which live sources are configured right now."""
-    return {s.name: s.available() for s in LIVE_SOURCES}
+    """Which live sources are configured right now. eBay is listed apart: it feeds
+    only the unrated eBay box, never the live search."""
+    return {**{s.name: s.available() for s in enabled_sources()}, "eBay": EBAY.available()}
 
 
 @app.get("/me")

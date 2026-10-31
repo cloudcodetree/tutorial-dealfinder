@@ -9,7 +9,11 @@ offline half of the snapshot/live split (spec §2).
 A snapshot row is a flat dict::
 
     {id, query, category, title, brand, price, currency, source,
-     marketplace, url, image_url, deal_pct, median_price_at_capture}
+     marketplace, url, deal_pct, median_price_at_capture}
+
+The listings' image URLs were removed from the committed file (spec §2), and the
+loader drops any ``image_url`` a future snapshot might carry, so no image from
+the teaching data ever reaches a page.
 
 Note that ``brand`` here holds the *retailer* in 154/270 rows ("Walmart - COWIN",
 "Target"); the true manufacturer is extracted from the title in ``features.py``.
@@ -44,7 +48,8 @@ def load_snapshot(path: str | None = None) -> list[dict]:
     p = Path(path) if path else _newest_snapshot()
     data = json.loads(p.read_text())
     # The snapshot is ``{"meta": {...}, "items": [...]}``; tolerate a bare list too.
-    return data["items"] if isinstance(data, dict) else data
+    items = data["items"] if isinstance(data, dict) else data
+    return [{k: v for k, v in r.items() if k != "image_url"} for r in items]
 
 
 def load_snapshot_meta(path: str | None = None) -> dict:
@@ -74,7 +79,7 @@ def to_products(items: list[dict]) -> list[Product]:
                 currency=r.get("currency", "USD"),
                 url=r["url"],
                 source=r.get("source", r.get("marketplace", "snapshot")),
-                image_url=r.get("image_url"),
+                image_url=None,
                 marketplace=r.get("marketplace"),
                 condition=parse_condition(r["title"]),
             )

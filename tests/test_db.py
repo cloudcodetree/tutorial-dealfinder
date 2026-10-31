@@ -2,6 +2,7 @@
 import pytest
 
 from dealfinder import db as db_mod
+from dealfinder import userstore
 
 
 def test_pooled_connection_does_not_leak_scope(db):
@@ -39,3 +40,19 @@ def test_scoped_gives_up_fast_when_the_database_is_unreachable():
         assert time.monotonic() - t0 < 6
     finally:
         db_mod._pools.pop(bad).close()
+
+
+def test_job_scope_sees_every_users_rows(db, offers):
+    userstore.add_watch("user-alice", "public", "off-1", None, url=db)
+    userstore.add_watch("user-bob", "public", "off-2", None, url=db)
+    with db_mod.job_scope(url=db) as cur:
+        users = {r["user_id"] for r in cur.execute(
+            "select user_id from dealfinder.watchlist where user_id in ('user-alice','user-bob')")}
+    assert users == {"user-alice", "user-bob"}
+
+
+def test_job_scope_does_not_leak_role(db):
+    with db_mod.job_scope(url=db) as cur:
+        cur.execute("select 1")
+    with db_mod.get_pool(db).connection() as c:
+        assert c.execute("select current_user as u").fetchone()["u"] != "dealfinder_job"

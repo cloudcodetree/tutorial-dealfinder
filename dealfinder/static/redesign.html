@@ -453,7 +453,7 @@ async function loadDeals(){
     const d = await (await fetch(`/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
     rankedThr = d.residual_threshold ?? rankedThr;
     $('#dealsCount').textContent = d.count;
-    $('#meta').innerHTML = `<span class="mono">${d.count} offers · median ${money(d.median_price)} · two-signal ranked</span>`;
+    $('#meta').innerHTML = `<span class="mono">${d.count} offers · ${d.median_price==null ? 'ratings off' : 'median '+money(d.median_price)} · two-signal ranked</span>`;
     lastResults = d.results;
     const held = d.results.filter(r=>r.verdict==='suspicious').length;
     $('#results').innerHTML = d.results.map(cardHTML).join('') +
@@ -471,7 +471,7 @@ function tagFor(v){
 }
 function cardHTML(r,i){
   const pct = r.pct_under_median;
-  const under = pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
+  const under = pct==null ? 'not rated' : pct>=0 ? `▼ ${pct}% under` : `▲ ${Math.abs(pct)}% over`;
   const thumb = r.image_url ? `<img class="thumb" src="${esc(r.image_url)}" alt="" referrerpolicy="no-referrer">` : `<div class="thumb"></div>`;
   const src = `<span class="mono" style="font-size:10px;color:var(--color-neutral-600);">${esc(r.source||'')}</span>`;
   const est = r.basis==='peers';       // fair price estimated from peers, not a trained model

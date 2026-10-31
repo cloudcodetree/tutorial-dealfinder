@@ -22,6 +22,10 @@ class Product(BaseModel):
     url: str
     source: str
     image_url: str | None = None
+    # Store provenance (Best Buy): the store's SKU and its own "was" price. The
+    # regular price is display-only and never feeds a signal (shop.score_offers).
+    sku: str | None = None
+    regular_price: float | None = None
     # Broad-electronics fields (added for the real-data regeneration). All are
     # optional / defaulted so existing callers and fixtures keep working.
     marketplace: str | None = None  # e.g. "RapidAPI", "Apify" — where the offer was seen

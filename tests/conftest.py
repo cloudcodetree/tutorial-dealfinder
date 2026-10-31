@@ -12,8 +12,11 @@ import os
 import time
 
 import jwt
+import psycopg
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from dealfinder import pgstore
 
 _KEYS = [
     "RAPIDAPI_KEY",
@@ -24,6 +27,11 @@ _KEYS = [
     "EBAY_APP_ID",
     "EBAY_CERT_ID",
     "EBAY_CAMPAIGN_ID",
+    # Behavior switches, not keys, but a value in .env would flip the same branches.
+    "DEALFINDER_SOURCES",
+    "DEALFINDER_VERDICT_MODE",
+    "DEALFINDER_EBAY_ALLOW_SANDBOX",
+    "DEALFINDER_ENV",
 ]
 
 
@@ -93,20 +101,44 @@ def mint(_es256_key, monkeypatch):
 
 @pytest.fixture
 def stub_sources(monkeypatch):
-    """Keep /ranked off the network: canned offers and deterministic embeddings."""
-    from dealfinder import serve
+    """Keep /ranked off the network: canned Best Buy offers and deterministic embeddings."""
+    from dealfinder import serve, shop
 
     fake = {
         "query": "x", "sources_live": ["Stub"], "throttled": [], "median_price": 60.0, "count": 3,
         "results": [
             {"id": "h1", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
-             "price": 50.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 16.7},
+             "price": 50.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 16.7},
             {"id": "h2", "title": "Anker Soundcore Q20i Headphones", "brand": "Anker",
-             "price": 60.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": 0.0},
+             "price": 60.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 0.0},
             {"id": "h3", "title": "Bose QuietComfort 45 Headphones", "brand": "Bose",
-             "price": 70.0, "source": "Stub", "url": "", "image_url": None, "deal_pct": -16.7},
+             "price": 70.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": -16.7},
         ],
     }
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
-    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
+    monkeypatch.setattr(shop, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
     return fake
+
+
+def row(id, title, price, source, **kw):
+    """One aggregate result dict, as dealfinder.aggregate returns it."""
+    return {"id": id, "title": title, "brand": None, "price": price, "source": source, "url": "",
+            "image_url": None, "sku": None, "regular_price": None,
+            "fetched_at": "2026-10-26T12:00:00Z", **kw}
+
+
+_OFFER_IDS = ("off-1", "off-2", "acme-1", "bestbuy-77", "ebay-legacy")
+
+
+@pytest.fixture
+def offers(db):
+    """Three catalog offers (two public, one in tenant acme); removes everything the tests made."""
+    pgstore.upsert([{"id": "off-1", "title": "Anker Soundcore Q20i", "source": "BestBuy", "price": 44.99},
+                    {"id": "off-2", "title": "Bose QuietComfort 45", "source": "BestBuy", "price": 46.00}],
+                   None, tenant="public", url=db)
+    pgstore.upsert([{"id": "acme-1", "title": "Acme Only", "source": "BestBuy", "price": 10.0}],
+                   None, tenant="acme", url=db)
+    yield db
+    with psycopg.connect(db) as c:
+        c.execute("delete from dealfinder.watchlist where offer_id = any(%s)", (list(_OFFER_IDS) + ["nope"],))
+        c.execute("delete from dealfinder.offers where id = any(%s)", (list(_OFFER_IDS),))

@@ -6,6 +6,7 @@ vectors; the semantic test injects explicit near-identical vectors), so the
 suite never loads the embedding model.
 """
 import hashlib
+import time
 
 import numpy as np
 import pytest
@@ -46,6 +47,18 @@ class _Stub:
         if self.fail:
             raise RuntimeError("rate limited")
         return self._products
+
+
+class _Sleeper(_Stub):
+    """A source that takes `seconds` to answer."""
+
+    def __init__(self, name, seconds, tier=5, products=()):
+        super().__init__(name, list(products), tier=tier)
+        self.seconds = seconds
+
+    def search(self, query, limit=15):
+        time.sleep(self.seconds)
+        return super().search(query, limit)
 
 
 def _p(pid, title, price, source):
@@ -117,3 +130,36 @@ def test_semantic_dedup_keeps_distinct_products_apart():
     b = _p("b", "Samsung 27in 4K Monitor", 299.99, "S1")
     out = aggregate("x", sources=[_Stub("S1", [a, b])])
     assert {r["id"] for r in out["results"]} == {"a", "b"}
+
+
+def test_slow_source_times_out_without_blocking():
+    slow, fast = _Sleeper("SLOW", 2.0, tier=1), _Stub("FAST", [_p("f1", "Widget", 10, "FAST")], tier=1)
+    t0 = time.monotonic()
+    out = aggregate("w", sources=[slow, fast], timeout_s=0.2)
+    assert time.monotonic() - t0 < 1.0
+    assert out["count"] == 1 and "SLOW" in out["timed_out"] and "SLOW" in out["throttled"]
+    assert agg._benched("SLOW")
+
+
+def test_same_tier_sources_run_concurrently():
+    a = _Sleeper("A", 0.3, tier=1, products=[_p("a1", "Alpha", 10, "A")])
+    b = _Sleeper("B", 0.3, tier=1, products=[_p("b1", "Beta", 20, "B")])
+    t0 = time.monotonic()
+    assert aggregate("w", sources=[a, b], timeout_s=2.0)["count"] == 2
+    assert time.monotonic() - t0 < 0.55
+
+
+def test_results_carry_provenance_fields():
+    p = Product(id="bestbuy-1", sku="1", regular_price=20.0, title="Thing", brand="B",
+                category="c", price=15.0, url="", source="BestBuy:sale")
+    r = aggregate("w", sources=[_Stub("BestBuy", [p], tier=1)])["results"][0]
+    assert (r["sku"], r["regular_price"]) == ("1", 20.0) and r["fetched_at"].endswith("Z")
+
+
+def test_benched_sources_are_reported():
+    # A source skipped because it is cooling down must show up, so callers can
+    # tell "no results" from "a store did not answer".
+    a = _Stub("A", [_p("a1", "Alpha", 10, "A")], tier=1)
+    agg._bench("A")
+    out = aggregate("w", sources=[a])
+    assert out["count"] == 0 and out["benched"] == ["A"] and a.calls == 0

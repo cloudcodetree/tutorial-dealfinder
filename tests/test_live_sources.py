@@ -1,8 +1,10 @@
 """Offline tests for live-source parsing (HTTP mocked with respx)."""
 import httpx
+import pytest
 import respx
 
-from dealfinder.live_sources import FirecrawlSource
+from dealfinder import live_sources
+from dealfinder.live_sources import BestBuySource, EbaySource, FirecrawlSource
 
 
 @respx.mock
@@ -39,6 +41,7 @@ def test_bestbuy_search_maps_saleprice(monkeypatch):
     out = BestBuySource().search("4k tv")
     assert len(out) == 1
     assert out[0].price == 399.99 and out[0].source == "BestBuy:sale" and out[0].brand == "Sony"
+    assert out[0].sku == "123" and out[0].regular_price == 499.99
 
 
 @respx.mock
@@ -99,3 +102,113 @@ def test_amazon_off_without_token(monkeypatch):
     from dealfinder.live_sources import AmazonSource
     assert AmazonSource().available() is False
     assert AmazonSource().search("headphones") == []
+
+
+def test_ebay_is_not_a_live_source():
+    assert all(s.name != "eBay" for s in live_sources.LIVE_SOURCES)
+
+
+def test_enabled_sources_from_env(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_SOURCES", "bestbuy")
+    assert [s.name for s in live_sources.enabled_sources()] == ["BestBuy"]
+
+
+def test_enabled_sources_default_is_every_course_source(monkeypatch):
+    monkeypatch.delenv("DEALFINDER_SOURCES", raising=False)
+    assert live_sources.enabled_sources() == live_sources.LIVE_SOURCES
+
+
+@pytest.mark.parametrize("names, msg", [("BestBuy,eBay", "ebay_box"), ("Walmart", "unknown source")])
+def test_enabled_sources_rejects_bad_names(names, msg):
+    with pytest.raises(ValueError, match=msg):
+        live_sources.enabled_sources(names)
+
+
+@respx.mock
+def test_ebay_sends_no_affiliate_context(monkeypatch):
+    monkeypatch.setenv("EBAY_APP_ID", "chrishar-DealFind-SBX-abc")
+    monkeypatch.setenv("EBAY_CERT_ID", "SBX-secret")
+    monkeypatch.setenv("EBAY_CAMPAIGN_ID", "123")
+    respx.post("https://api.sandbox.ebay.com/identity/v1/oauth2/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "t", "expires_in": 7200, "token_type": "App"}))
+    search_route = respx.get("https://api.sandbox.ebay.com/buy/browse/v1/item_summary/search").mock(
+        return_value=httpx.Response(200, json={"itemSummaries": [
+            {"itemId": "v1|9|0", "title": "Laptop", "price": {"value": "100.00", "currency": "USD"},
+             "condition": "Used", "itemAffiliateWebUrl": "https://aff/x", "itemWebUrl": "https://ebay/x"},
+        ]}))
+    out = EbaySource().search("laptop")
+    assert "X-EBAY-C-ENDUSERCTX" not in search_route.calls.last.request.headers
+    assert out[0].url == "https://ebay/x"
+
+
+def _bestbuy_skus(request):
+    """Answer a products(sku in(...)) lookup with skus 1 and 2 only."""
+    known = {"1": "Thing One", "2": "Thing Two"}
+    asked = request.url.path.split("sku in(")[-1].split(")")[0].split(",")
+    return httpx.Response(200, json={"products": [
+        {"sku": int(s), "name": known[s], "salePrice": 10.0 * int(s), "regularPrice": 20.0,
+         "url": f"https://bestbuy.com/{s}", "image": None, "manufacturer": "B"} for s in asked if s in known]})
+
+
+@respx.mock
+def test_lookup_skus_batches_and_maps(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    route = respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(side_effect=_bestbuy_skus)
+    found = BestBuySource().lookup_skus(["1", "2", "3", "2"])
+    assert set(found) == {"1", "2"} and route.call_count == 1 and found["1"].sku == "1"
+
+
+@respx.mock
+def test_lookup_skus_splits_batches_of_100_and_paces_them(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    waits = []
+    monkeypatch.setattr(live_sources.time, "sleep", waits.append)
+    route = respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(
+        return_value=httpx.Response(200, json={"products": []}))
+    assert BestBuySource().lookup_skus([str(i) for i in range(1, 151)]) == {}
+    assert route.call_count == 2 and waits and min(waits) >= 0.2
+
+
+def test_lookup_skus_rejects_non_digit_skus(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    with pytest.raises(ValueError):
+        BestBuySource().lookup_skus(["123)&apiKey=x"])
+
+
+def test_lookup_skus_without_a_key_is_a_failure_not_gone(monkeypatch):
+    # A missing secret in a re-price job must never read as "every SKU is gone".
+    monkeypatch.delenv("BESTBUY_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="bestbuy lookup failed: no key"):
+        BestBuySource().lookup_skus(["1"])
+    assert BestBuySource().lookup_skus([]) == {}
+
+
+@respx.mock
+def test_lookup_skus_network_error_is_a_failure_not_gone(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(side_effect=httpx.ConnectError("down"))
+    with pytest.raises(RuntimeError, match="bestbuy lookup failed"):
+        BestBuySource().lookup_skus(["1"])
+
+
+@respx.mock
+def test_lookup_skus_failure_is_not_gone(monkeypatch):
+    monkeypatch.setenv("BESTBUY_API_KEY", "k")
+    respx.get(url__regex=r"https://api\.bestbuy\.com/v1/products\(sku.*").mock(return_value=httpx.Response(500))
+    with pytest.raises(RuntimeError, match="bestbuy lookup failed: 500"):
+        BestBuySource().lookup_skus(["1"])
+
+
+def test_production_requires_an_explicit_source_list(monkeypatch):
+    # A lost DEALFINDER_SOURCES must not switch on the course sources in production.
+    monkeypatch.setenv("DEALFINDER_ENV", "production")
+    monkeypatch.delenv("DEALFINDER_SOURCES", raising=False)
+    with pytest.raises(ValueError, match="DEALFINDER_SOURCES must be set in production"):
+        live_sources.enabled_sources()
+
+
+def test_production_refuses_a_course_only_source(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_ENV", "production")
+    with pytest.raises(ValueError, match="not a launch source: Shopify"):
+        live_sources.enabled_sources("BestBuy,Shopify")
+    assert [s.name for s in live_sources.enabled_sources("BestBuy")] == ["BestBuy"]

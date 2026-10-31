@@ -4,10 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dealfinder import db as db_mod
-from dealfinder import pgstore, serve, userstore
+from dealfinder import licensing, pgstore, serve, shop, userstore
 from dealfinder.cache import SemanticCache
 from dealfinder.serve import _catalog, app
-from tests.conftest import bearer
+from tests.conftest import bearer, row
 
 client = TestClient(app)
 
@@ -77,44 +77,30 @@ def test_semantic_offline_fallback_returns_verdicts(monkeypatch):
         assert bose["verdict"] == "suspicious"
 
 
-def test_peer_fair_prices_flags_the_within_cluster_outlier(monkeypatch):
-    # The category-agnostic fallback: an offer's fair price is the median of its
-    # nearest semantic neighbors in the result set. With identical embeddings every
-    # offer's peers are the others, so the cheap outlier's fair price is the median
-    # of the rest — far above it. Mock embeddings → hermetic, no model needed.
-    import dealfinder.serve as serve
-
-    offers = [{"title": f"acoustic guitar {i}", "price": p}
-              for i, p in enumerate([60.0, 65.0, 70.0, 75.0, 80.0])]
-    offers.append({"title": "acoustic guitar cheap", "price": 8.0})
-    monkeypatch.setattr(serve, "_embed_texts", lambda titles: [[1.0, 0.0] for _ in titles])
-    pf = serve._peer_fair_prices(offers)
-    assert pf[5] >= 60.0          # the $8 outlier's peer fair is the median of the rest
-
-
 def test_ranked_scores_any_search_via_the_layered_estimator(monkeypatch):
     # /ranked works for ANY search: trained model where a category has one
     # (electronics), a peer estimate otherwise (guitars) — so every offer still
     # gets a real second signal. Mock aggregate() + embeddings for determinism.
     import dealfinder.serve as serve
+    from dealfinder import shop
 
     fake = {
-        "query": "x", "sources_live": ["eBay"], "throttled": [], "median_price": 60.0, "count": 5,
+        "query": "x", "sources_live": ["BestBuy"], "throttled": [], "median_price": 60.0, "count": 5,
         "results": [
             {"id": "h", "title": "Sony WH-1000XM5 Wireless Headphones", "brand": "Sony",
-             "price": 50.0, "source": "eBay", "url": "", "image_url": None, "deal_pct": 16.7},
+             "price": 50.0, "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 16.7},
             {"id": "g1", "title": "41-Inch Acoustic Guitar", "brand": None, "price": 60.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 0.0},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 0.0},
             {"id": "g2", "title": "Full-Size Acoustic Guitar", "brand": None, "price": 70.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": -16.7},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": -16.7},
             {"id": "g3", "title": "Dreadnought Acoustic Guitar", "brand": None, "price": 65.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 8.3},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 8.3},
             {"id": "g4", "title": "Acoustic Guitar Bundle", "brand": None, "price": 8.0,
-             "source": "eBay", "url": "", "image_url": None, "deal_pct": 86.7},
+             "source": "BestBuy", "url": "", "image_url": None, "deal_pct": 86.7},
         ],
     }
     monkeypatch.setattr(serve, "aggregate", lambda q: fake)
-    monkeypatch.setattr(serve, "_embed_texts",
+    monkeypatch.setattr(shop, "_embed_texts",
                         lambda titles: [[0.0, 1.0] if "Headphones" in t else [1.0, 0.0] for t in titles])
     body = client.get("/ranked", params={"q": "anything", "k": 8}).json()
 
@@ -416,7 +402,8 @@ def test_ranked_remembers_shown_offers(monkeypatch, stub_sources, with_db):
     body = client.get("/ranked", params={"q": "headphones", "k": 2}).json()
     assert len(calls) == 1
     rows, embs, tenant = calls[0]
-    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and embs is None and tenant == "public"
+    assert [r["id"] for r in rows] == [r["id"] for r in body["results"]] and tenant == "public"
+    assert len(embs) == len(rows) and all(e is not None for e in embs)   # Best Buy rows may be embedded
 
 
 def test_remembering_offers_never_breaks_ranked(monkeypatch, stub_sources, with_db):
@@ -535,3 +522,120 @@ def test_supabase_js_is_pinned_with_sri():
     assert re.search(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/supabase-js@2\.45\.4/dist/umd/supabase\.js"'
                      r' integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"'
                      r' crossorigin="anonymous"></script>', _lab_html())
+
+
+def _bestbuy_rows():
+    return [row(f"bestbuy-{i}", f"Headphones {i}", p, "BestBuy", sku=str(i)) for i, p in enumerate([100.0, 200.0, 300.0])]
+
+
+def _stub_search(monkeypatch, results, ebay_items=()):
+    monkeypatch.setattr(serve, "_DB", False)   # nothing reaches a real database
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": list(results), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": bool(ebay_items), "note": "n",
+                                                               "items": list(ebay_items)})
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: [[1.0, 0.0] for _ in t])
+
+
+def test_ebay_never_reaches_results_median_peers_or_db(monkeypatch):
+    bb = _bestbuy_rows()
+    stray = row("ebay-7", "EBAY ONLY TITLE", 1.0, "eBay:Used")
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": bb + [stray], "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": True, "note": "n", "items": [
+        {"id": "ebay-9", "title": "t", "price": 5.0, "currency": "USD", "url": "u", "condition": "Used", "image_url": None}]})
+    embedded, stored = [], []
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: embedded.extend(t) or [[1.0, 0.0] for _ in t])
+    monkeypatch.setattr(serve, "_DB", True)
+    monkeypatch.setattr(pgstore, "upsert", lambda rows, emb, tenant="public", url=None: stored.append(rows) or 0)
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert {r["source"] for r in body["results"]} == {"BestBuy"} and body["median_price"] == 200.0
+    assert "EBAY ONLY TITLE" not in embedded
+    assert stored and not any(r["id"].startswith("ebay") for rows in stored for r in rows)
+    assert body["ebay"]["items"][0]["id"] == "ebay-9" and "verdict" not in body["ebay"]["items"][0]
+
+
+def test_search_response_matches_the_contract(monkeypatch):
+    _stub_search(monkeypatch, _bestbuy_rows())
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert set(body) == {"query", "mode", "count", "median_price", "fetched_at", "results", "ebay", "attribution",
+                         "degraded"}
+    assert body["degraded"] is False
+    assert {"id", "sku", "slug", "title", "brand", "source", "price", "regular_price", "url", "image_url",
+            "verdict", "pct_under_median", "fair", "residual_frac", "basis", "reason"} <= set(body["results"][0])
+    assert body["attribution"] == [licensing.POLICIES["BestBuy"].attribution]
+    assert body["mode"] == "live" and body["fetched_at"].endswith("Z")
+    _stub_search(monkeypatch, [])
+    empty_body = client.get("/search", params={"q": "headphones"}).json()
+    assert empty_body["attribution"] == [] and empty_body["results"] == [] and empty_body["median_price"] == 0.0
+
+
+@pytest.mark.parametrize("params", [{"q": ""}, {"q": "   "}, {"q": "x" * 201}, {"q": "ok", "k": 0},
+                                    {"q": "ok", "k": 25}, {"q": "a\x00b"}])
+def test_search_validates_input(params):
+    assert client.get("/search", params=params).status_code == 422
+
+
+def test_anonymous_search_is_edge_cacheable_and_signed_in_is_private(monkeypatch, mint):
+    _stub_search(monkeypatch, _bestbuy_rows())
+    assert client.get("/search", params={"q": "tv"}).headers["cache-control"] == "public, max-age=300"
+    signed = client.get("/search", params={"q": "tv"}, headers=bearer(mint("u-1")))
+    assert signed.headers["cache-control"] == "private, no-store"
+
+
+def test_check_mode_nulls_every_signal(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    embedded = []
+    bb = _bestbuy_rows()
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": list(bb), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(serve, "aggregate", lambda q: {"results": list(bb), "sources_live": ["BestBuy"]})
+    monkeypatch.setattr(shop, "ebay_box", lambda q, limit=6: {"enabled": False, "note": "n", "items": []})
+    monkeypatch.setattr(shop, "_embed_texts", lambda t: embedded.extend(t) or [[1.0, 0.0] for _ in t])
+    monkeypatch.setattr(serve, "_DB", True)   # run the remember step too, against a stub store
+    monkeypatch.setattr(pgstore, "upsert", lambda *a, **k: 0)
+    body = client.get("/search", params={"q": "headphones"}).json()
+    assert body["mode"] == "check" and body["median_price"] is None and embedded == []
+    nulls = ("verdict", "fair", "residual_frac", "basis", "pct_under_median")
+    assert all(r[k] is None for r in body["results"] for k in nulls)
+    assert all(r["reason"] == "Ratings are off for store listings. Use Check a deal to rate a price you found."
+               for r in body["results"])
+    assert all(r["verdict"] is None for r in client.get("/ranked", params={"q": "headphones"}).json()["results"])
+    assert embedded == []
+
+
+def test_check_uses_no_live_source(monkeypatch):
+    monkeypatch.setattr(shop, "aggregate", lambda *a, **k: pytest.fail("no live search"))
+    monkeypatch.setattr(shop.EBAY, "search", lambda *a, **k: pytest.fail("no eBay"))
+    r = client.get("/check", params={"title": "Sony WH-1000XM5", "price": 199})
+    assert r.status_code == 200
+    assert set(r.json()) == {"title", "price", "category", "fair", "residual_frac", "verdict", "reason", "basis"}
+
+
+@pytest.mark.parametrize("params", [{"title": "ab", "price": 10}, {"title": "TV set", "price": 0},
+                                    {"title": "TV set", "price": -1}, {"title": "TV set", "price": 50001},
+                                    {"title": "   ab   ", "price": 10}, {"title": "x" * 201, "price": 10},
+                                    {"title": "TV set", "price": "nan"}])
+def test_check_validation(params):
+    assert client.get("/check", params=params).status_code == 422
+
+
+def test_check_works_in_check_mode(monkeypatch):
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    monkeypatch.setattr(shop, "_fair_for", lambda t: ("audio", 100.0))
+    assert client.get("/check", params={"title": "Sony WH-1000XM5", "price": 80}).json()["verdict"] == "deal"
+
+
+@pytest.mark.parametrize("trouble", [{"timed_out": ["BestBuy"], "throttled": ["BestBuy"]},
+                                     {"throttled": ["BestBuy"]}, {"benched": ["BestBuy"]}])
+def test_degraded_search_is_not_edge_cached(monkeypatch, trouble):
+    _stub_search(monkeypatch, [])
+    monkeypatch.setattr(shop, "aggregate", lambda q: {"results": [], "sources_live": [], **trouble})
+    r = client.get("/search", params={"q": "tv"})
+    assert r.json()["degraded"] is True and r.headers["cache-control"] == "no-store"
+
+
+def test_ranked_carries_attribution_and_follows_check_mode(monkeypatch, stub_sources):
+    body = client.get("/ranked", params={"q": "headphones"}).json()
+    assert body["attribution"] == [licensing.POLICIES["BestBuy"].attribution]
+    assert isinstance(body["median_price"], float)
+    monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
+    body = client.get("/ranked", params={"q": "headphones"}).json()
+    assert body["median_price"] is None and all(r["verdict"] is None for r in body["results"])

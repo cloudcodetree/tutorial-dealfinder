@@ -11,7 +11,7 @@ transaction, so a client cannot set the price it is alerted on.
 """
 from __future__ import annotations
 
-from . import db
+from . import db, licensing
 
 WATCH_LIMIT = 200
 SAVED_SEARCH_LIMIT = 50
@@ -50,6 +50,8 @@ def add_watch(user_id: str, tenant_id: str, offer_id: str, target_price: float |
             (offer_id,),
         ).fetchone()
         if offer is None:
+            raise LookupError(offer_id)
+        if not licensing.may_store(offer["source"]):  # only a row stored before the license rules
             raise LookupError(offer_id)
         _lock_user(cur, user_id)
         watched = cur.execute("SELECT 1 FROM dealfinder.watchlist WHERE offer_id = %s", (offer_id,)).fetchone()
