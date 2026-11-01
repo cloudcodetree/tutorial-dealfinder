@@ -214,3 +214,115 @@ moved. **Action:** open a retrain review; drift alone isn't an outage, but stale
 | `frontend/e2e/live.spec.ts`   | real full-stack search (opt-in)                           | backend on :8000, then `E2E_LIVE=1 npm run test:e2e:live` |
 | `scripts/loadtest.py`         | real p50/p95/p99 + throughput, or refuses if app is down  | `.venv/bin/python scripts/loadtest.py` |
 | `tests/test_chaos.py`         | breaker benches bad sources; all-down → empty, not 500    | part of `.venv/bin/python -m pytest -q` |
+
+---
+
+## 8. The live product: deals.beta.cloudcodetree.com until launch
+
+Sections 1 to 7 describe the course stack. This section is the one real deployment.
+It costs $0 a month by design (`COST.md`, Tier 3). There is no Best Buy key yet, so
+the live routes are `/api/check`, the lab and the health checks.
+
+Until launch the product runs only on the staging host `deals.beta.cloudcodetree.com`,
+noindexed. `deals.cloudcodetree.com` has no DNS record. Plan 8 adds a production
+environment to `edge/wrangler.jsonc` for it, deployed to the Worker named
+`dealfinder-edge`, which exists today with no domain.
+
+### Service map
+
+| Piece | What it is | Where |
+|---|---|---|
+| Edge | Worker `dealfinder-edge-staging` on `deals.beta.cloudcodetree.com`, serves `frontend/dist` and proxies `/api/*` | `edge/src/index.ts`, `edge/wrangler.jsonc` |
+| API | Cloud Run service `dealfinder-api`, project `dealfinder-prod-cct`, `us-central1`, 0 to 2 instances | `deploy/gcp/run.tf` |
+| Secrets | Secret Manager `dealfinder-env`, one JSON object, expanded at startup | `deploy/secrets.py`, `dealfinder/settings.py` |
+| Database | the `dealfinder` schema in Supabase `cct-demos`, login role `dealfinder_svc` through the transaction pooler, TLS verify-full | `deploy/create_login_role.py`, `deploy/prod_db.py` |
+| Images | Artifact Registry `dealfinder`, the 2 newest kept | `deploy/gcp/registry.tf` |
+
+The API is reachable only through the Worker. Every request without the
+`X-DealFinder-Edge` header gets a 403, except `/health`, `/healthz` and `/readyz`.
+
+### Health checks
+
+```bash
+curl -fsS https://deals.beta.cloudcodetree.com/api/health    # {"status":"ok"}
+curl -fsS https://deals.beta.cloudcodetree.com/api/readyz    # {"db":"ok","schema":"current"}
+python scripts/cost_check.py --live --project dealfinder-prod-cct   # every check ✓
+```
+
+- Use `/health` against Cloud Run. Its front end reserves `/healthz` and answers it
+  with Google's own 404, so the request never reaches the container.
+- Cloudflare answers Python's default User-Agent with 403, error code 1010. A script
+  that probes the site must send its own `User-Agent`, as `scripts/coldstart.py` does.
+
+### Cold start
+
+The first request after scale-to-zero, measured with `scripts/coldstart.py` through
+the Worker on 2026-10-31, 3 runs. The Worker then served `deals.cloudcodetree.com`.
+The backend is the same one beta uses now:
+
+| Run | `/health` | `/readyz` |
+|---|---|---|
+| 1 | 3.9 s | 0.8 s |
+| 2 | 9.8 s | 0.9 s |
+| 3 | 7.2 s | 0.6 s |
+| **median** | **7.2 s** | **0.8 s** |
+
+`/health` carries the start itself: the container start, Python's imports and the
+per-category price models that `dealfinder/serve.py` fits at import. The embedding
+model loads in a background thread after startup, so it does not hold up `/health`.
+`/readyz` comes right after, on the warm instance, and includes the database round
+trip. The gate is 10 s for every run, and run 2 passed it by 0.2 s. If a
+later image goes over, `scripts/coldstart.py` exits 1. Re-measure after any change to
+the image or to import-time work. Each run forces a new revision with a
+`COLDSTART_NONCE` env var, so remove it afterwards and `tofu plan` reads "No changes":
+```bash
+gcloud run services update dealfinder-api --region us-central1 --project dealfinder-prod-cct --remove-env-vars COLDSTART_NONCE
+```
+
+### Deploy
+
+A push to `main` deploys both pieces once the `test` and `edge` jobs pass
+(`.github/workflows/ci.yml`, job `deploy`). It builds the image, runs
+`gcloud run deploy dealfinder-api --image <sha>`, runs `wrangler deploy`, then checks
+`/api/health` and `/api/readyz`. The first deploy by hand is in `deploy/gcp/README.md`.
+
+### Rollback
+
+The API, to the previous revision:
+```bash
+gcloud run revisions list --service dealfinder-api --region us-central1 --project dealfinder-prod-cct
+gcloud run services update-traffic dealfinder-api --to-revisions <REVISION>=100 --region us-central1 --project dealfinder-prod-cct
+```
+Traffic stays pinned to that revision, and a later deploy does not move it. The
+deploy job's checks still pass against the pinned revision, so that deploy looks
+green while the old code serves. Return to the newest revision with `--to-latest`
+in place of `--to-revisions`. The registry
+keeps only the 2 newest images, so a rollback reaches one image back.
+
+The Worker, from `edge/`. Its config names `dealfinder-edge-staging`:
+```bash
+npx wrangler deployments list
+npx wrangler rollback <VERSION_ID>
+```
+
+### Rotate a credential
+
+- **A provider key** (Best Buy, eBay, Resend and the rest): put the new value in `.env`,
+  then run `python deploy/secrets.py push --project dealfinder-prod-cct`. Push keeps every
+  stored key the file does not name and never sends the file's `DATABASE_URL`.
+- **The database password:** `python deploy/create_login_role.py --project dealfinder-prod-cct --rotate`.
+  The old password stops working at once.
+- Running instances keep the values they started with. After either rotation, roll a
+  fresh revision of the same image, the same command the deploy job runs:
+  ```bash
+  IMAGE=$(gcloud run services describe dealfinder-api --region us-central1 --project dealfinder-prod-cct --format='value(spec.template.spec.containers[0].image)')
+  gcloud run deploy dealfinder-api --image "$IMAGE" --region us-central1 --project dealfinder-prod-cct
+  ```
+- `EDGE_SHARED_SECRET` and `UNSUBSCRIBE_SECRET` are generated once and kept on every
+  push. No script rotates them yet.
+
+### Teardown
+
+`COST.md`, Teardown section D: `tofu destroy`, `wrangler delete` for both Workers, then
+`DROP ROLE dealfinder_svc;` as the database admin. The `dealfinder` schema and its
+two group roles stay in the shared project until you drop them too.

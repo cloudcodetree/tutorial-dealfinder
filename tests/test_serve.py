@@ -639,3 +639,36 @@ def test_ranked_carries_attribution_and_follows_check_mode(monkeypatch, stub_sou
     monkeypatch.setenv("DEALFINDER_VERDICT_MODE", "check")
     body = client.get("/ranked", params={"q": "headphones"}).json()
     assert body["median_price"] is None and all(r["verdict"] is None for r in body["results"])
+
+
+def test_edge_guard_rejects_missing_or_wrong_header(monkeypatch):
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    assert client.get("/config.json").status_code == 403
+    assert client.get("/config.json", headers={"X-DealFinder-Edge": "wrong"}).status_code == 403
+    assert client.get("/config.json", headers={"X-DealFinder-Edge": "s3cret"}).status_code == 200
+
+
+def test_edge_guard_exempts_health(monkeypatch):
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/readyz").status_code in (200, 503)   # never 403
+
+
+def test_rate_limit_returns_429_with_retry_after(monkeypatch, stub_sources):
+    from dealfinder import ratelimit
+
+    monkeypatch.setenv("DEALFINDER_RATELIMIT", "on")
+    monkeypatch.setattr(serve, "_limiter", ratelimit.Limiter())
+    responses = [client.get("/ask", params={"q": "x"}, headers={"CF-Connecting-IP": "9.9.9.9"})
+                 for _ in range(6)]
+    assert [r.status_code for r in responses[:5]] == [200] * 5 and responses[5].status_code == 429
+    assert responses[5].json() == {"detail": "slow down"}
+    assert int(responses[5].headers["Retry-After"]) >= 1
+
+
+def test_health_alias_answers_without_the_edge_header(monkeypatch):
+    # Cloud Run's front end reserves /healthz and answers it with Google's own 404, so
+    # probes through the Worker use /health.
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
+    r = client.get("/health")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}

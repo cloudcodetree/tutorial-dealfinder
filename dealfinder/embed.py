@@ -13,6 +13,7 @@ offline and reproducible.
 from __future__ import annotations
 
 import hashlib
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -24,7 +25,7 @@ from .schema import Product
 
 _MODEL_NAME = "BAAI/bge-small-en-v1.5"
 _model = None
-# The model loads lazily and downloads ~130MB from HF on first use. Guard the
+# The model loads lazily and downloads 66.5 MB from HF on first use. Guard the
 # init so concurrent first-callers construct it ONCE — without this, a cold,
 # multi-request start races here and wedges on fastembed's download file-locks
 # (the pgvector /semantic path hang). Pair with warm() to preload at startup.
@@ -42,7 +43,11 @@ def _get_model():
             if _model is None:  # double-checked: only the first thread constructs
                 from fastembed import TextEmbedding
 
-                _model = TextEmbedding(_MODEL_NAME)
+                # The production image bakes the model into DEALFINDER_MODEL_DIR,
+                # so a cold start reads it from disk and never downloads it.
+                model_dir = os.getenv("DEALFINDER_MODEL_DIR")
+                kw = {"cache_dir": model_dir} if model_dir else {}
+                _model = TextEmbedding(_MODEL_NAME, **kw)
     return _model
 
 

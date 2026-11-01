@@ -63,6 +63,35 @@ note its free-tier ceiling, and add its teardown line to your own checklist.
 
 ---
 
+## Tier 3 — the live product (deals.beta.cloudcodetree.com until launch)
+
+The real deployment, separate from the course: you never need it to learn. It is
+designed to cost **$0 a month**, and every component below has a free allowance, a
+way the design stays under it, and a teardown command. At launch there is no Best
+Buy key, so there are no scheduled jobs and no stored store data (Plan 3, "Launch
+without Best Buy").
+
+| Component | Free allowance (source) | Expected use | How we stay under | Teardown |
+|---|---|---|---|---|
+| Cloud Run service `dealfinder-api` | 180,000 vCPU-s, 360,000 GB-s and 2M requests a month ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | well under 1% at launch traffic | scales to zero, `max_instance_count = 2`, request-based billing (`cpu_idle = true`), 30 s timeout. The price of scaling to zero is a cold start: median 7.2 s, worst 9.8 s over 3 runs on 2026-10-31 (`RUNBOOK.md` §8) | `tofu -chdir=deploy/gcp destroy` |
+| Cloud Scheduler | 3 jobs per **billing account** ([pricing](https://cloud.google.com/scheduler/pricing)) | not used at launch | no job exists until a Best Buy key arrives; `cost_check --live` counts jobs across the billing account | none to remove |
+| Secret Manager `dealfinder-env` | 6 active versions, 10,000 accesses a month ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | 1 version, one access per instance start | `deploy/secrets.py` destroys older versions on every write | `tofu -chdir=deploy/gcp destroy` |
+| Artifact Registry `dealfinder` | 0.5 GB storage ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | one image is 297 MB in the registry (297,449,999 bytes, measured 2026-10-31); two versions share the dependency and model layers | cleanup policy keeps the 2 newest images; `cost_check --live` fails above 450 MB | `tofu -chdir=deploy/gcp destroy` |
+| Cloud Logging | 50 GiB per project a month ([GCP free tier](https://docs.cloud.google.com/free/docs/free-cloud-features)) | megabytes | one short JSON line per request | removed with the project |
+| Budget alert | free | 1 budget at $1 | emails at 50%, 90%, 100% and a 100% forecast | `tofu -chdir=deploy/gcp destroy` |
+| Workers `dealfinder-edge-staging` (beta host) and `dealfinder-edge` (no domain until launch) | 100,000 requests a day per account on Workers Free ([pricing](https://developers.cloudflare.com/workers/platform/pricing/)) | every page view and API call is one request | edge cache for anonymous search, rate limits on the LLM routes | `npx wrangler delete <name>` for each (in `edge/`) |
+| Supabase `cct-demos` (shared with cloudcodetree.com) | 500 MB database on the free plan ([pricing](https://supabase.com/pricing)) | no visitor data at launch | own `dealfinder` schema; Best Buy rows purged before 72 hours once a key exists | `DROP ROLE dealfinder_svc` (see `RUNBOOK.md`) |
+| Best Buy API | 50,000 calls a day, no billing | not used at launch | no key yet | none |
+| Healthchecks.io | 20 checks on Hobbyist | not used at launch | Plan 5 adds the uptime check | none |
+
+Check the live footprint any time:
+
+```bash
+python scripts/cost_check.py --live --project <project_id>   # every line ✓ and exit 0
+```
+
+---
+
 ## Teardown
 
 ### A. Back to $0 locally (the common case — you finished the course)
@@ -93,6 +122,16 @@ you're done. Omit `-v` if you want to keep your local data but stop the containe
 Delete, per component: the Supabase project, the Redis instance, the Cloudflare
 Worker/Pages project, the email provider key. Then confirm no provider dashboard shows a
 running/billable resource.
+
+### D. Decommission the live product (Tier 3)
+```bash
+tofu -chdir=deploy/gcp destroy -var-file=prod.tfvars   # Cloud Run, the secret, the registry, WIF, the budget
+cd edge && npx wrangler delete dealfinder-edge-staging && npx wrangler delete dealfinder-edge   # the Workers and their custom domains
+# then, as the database admin, in the shared project:
+#   DROP ROLE dealfinder_svc;
+```
+Then run `python scripts/cost_check.py --live --project <project_id>`. It should fail
+to find the service, which confirms nothing is left.
 
 ### Partial teardown
 - **Keep learning free, drop the paid extras:** do step **B** only — the local free
