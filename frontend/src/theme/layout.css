@@ -1,0 +1,33 @@
+/* Page frame: header, main column and footer. One column, readable at 375 px. */
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+.skip-link {
+  position: absolute; left: var(--space-4); top: -48px;
+  background: var(--color-surface); color: var(--color-text);
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); z-index: 10;
+}
+.skip-link:focus { top: var(--space-4); }
+.site-header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-8);
+  padding: var(--space-6) var(--space-6);
+  border-bottom: 1px solid var(--color-divider);
+}
+.brand { color: var(--color-text); font-weight: 700; font-size: 20px; text-decoration: none; }
+.brand span { color: var(--color-accent-400); }
+.site-header nav { display: flex; flex-wrap: wrap; gap: var(--space-6); }
+.site-header nav a { color: var(--color-neutral-400); text-decoration: none; }
+.site-header nav a:hover { color: var(--color-text); }
+.site-header nav a.active { color: var(--color-text); text-decoration: underline; text-underline-offset: 4px; }
+main {
+  flex: 1; width: 100%; max-width: 760px; margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+main:focus { outline: none; }
+.site-footer {
+  border-top: 1px solid var(--color-divider);
+  padding: var(--space-6); color: var(--color-neutral-400); font-size: 14px;
+}
+.site-footer nav { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-bottom: var(--space-3); }
+.site-footer p { margin: 0; max-width: 72ch; }
+.content h2 { font-size: 20px; margin-top: var(--space-8); }
+.content p, .content li { max-width: 68ch; }
+.content ul { padding-left: var(--space-8); }

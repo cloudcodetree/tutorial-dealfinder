@@ -1,0 +1,102 @@
+{
+  "deals": {
+    "part": null,
+    "slug": null,
+    "live": false
+  },
+  "stream": {
+    "part": null,
+    "slug": null,
+    "live": false
+  },
+  "watchlist": {
+    "part": null,
+    "slug": null,
+    "live": false
+  },
+  "semantic": {
+    "part": null,
+    "slug": null,
+    "live": false
+  },
+  "ask": {
+    "part": null,
+    "slug": null,
+    "live": false
+  },
+  "context": {
+    "part": 16,
+    "slug": "dealfinder-part-16",
+    "live": false
+  },
+  "review": {
+    "part": 17,
+    "slug": "dealfinder-part-17",
+    "live": false
+  },
+  "dataset": {
+    "part": 19,
+    "slug": "dealfinder-part-19",
+    "live": false
+  },
+  "pipeline": {
+    "part": 20,
+    "slug": "dealfinder-part-20",
+    "live": false
+  },
+  "models": {
+    "part": 21,
+    "slug": "dealfinder-part-21",
+    "live": false
+  },
+  "tracking": {
+    "part": 22,
+    "slug": "dealfinder-part-22",
+    "live": false
+  },
+  "evals": {
+    "part": 23,
+    "slug": "dealfinder-part-23",
+    "live": false
+  },
+  "mlops": {
+    "part": 24,
+    "slug": "dealfinder-part-24",
+    "live": false
+  },
+  "safety": {
+    "part": 25,
+    "slug": "dealfinder-part-25",
+    "live": false
+  },
+  "compliance": {
+    "part": 35,
+    "slug": "dealfinder-part-35",
+    "live": false
+  },
+  "inference": {
+    "part": 27,
+    "slug": "dealfinder-part-27",
+    "live": false
+  },
+  "ops": {
+    "part": 30,
+    "slug": "dealfinder-part-30",
+    "live": false
+  },
+  "auth": {
+    "part": 32,
+    "slug": "dealfinder-part-32",
+    "live": false
+  },
+  "billing": {
+    "part": 34,
+    "slug": "dealfinder-part-34",
+    "live": false
+  },
+  "suggestions": {
+    "part": 33,
+    "slug": "dealfinder-part-33",
+    "live": false
+  }
+}

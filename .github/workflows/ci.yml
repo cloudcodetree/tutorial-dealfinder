@@ -50,7 +50,31 @@ jobs:
       - run: npm test
       - run: npx tsc --noEmit
 
-  # Production deploy: main only, after both test jobs. GitHub mints a short-lived
+  # The shopper front end (frontend/): every Playwright spec, desktop and 375 px,
+  # including the axe WCAG 2.1 AA checks, against the built app with /api stubbed.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  # Production deploy: main only, after every test job. GitHub mints a short-lived
   # OIDC token and Workload Identity Federation trades it for the deploy service
   # account (deploy/gcp/wif.tf), so no Google key exists anywhere. Every value
   # reaches the shell through env:, never through an expression inside run:.
@@ -58,7 +82,7 @@ jobs:
   # exists, and the Cloudflare token is set on the one step that needs it, so no
   # npm install script can read either.
   deploy:
-    needs: [test, edge]
+    needs: [test, edge, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

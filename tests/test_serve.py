@@ -115,12 +115,6 @@ def test_ranked_scores_any_search_via_the_layered_estimator(monkeypatch):
     assert body["modeled"] == 1 and body["estimated"] == 4
 
 
-def test_redesign_route_serves_the_nocturne_page():
-    r = client.get("/redesign")
-    assert r.status_code == 200
-    assert "DealFinder" in r.text and "/ranked" in r.text
-
-
 def test_context_window_packs_orders_and_evicts():
     # Part 16 surface: retrieve wide, pack to a budget, evict the tail, and place
     # the survivors at the edges. Real bge token math, fully offline.
@@ -438,8 +432,7 @@ def test_config_json_exposes_only_public_settings(monkeypatch):
 
 
 def test_lab_has_no_dev_identity():
-    from pathlib import Path
-    html = (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+    html = _lab_html()
     assert "X-User-Id" not in html and "prompt(" not in html
     assert "@supabase/supabase-js@2.45.4" in html
 
@@ -504,8 +497,10 @@ def test_unwatch_with_a_nul_byte_is_404_not_500(mint, with_db):
 
 
 def _lab_html():
+    """The lab's markup and script together, as the browser receives them."""
     from pathlib import Path
-    return (Path(serve.__file__).parent / "static" / "redesign.html").read_text()
+    lab = Path(serve.__file__).parent / "static" / "lab"
+    return (lab / "index.html").read_text() + (lab / "lab.js").read_text()
 
 
 def test_lab_links_only_open_http_urls():

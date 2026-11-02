@@ -1,0 +1,27 @@
+/* Reset, body type and the accessibility basics every page shares. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+}
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.15;
+  margin: 0 0 var(--space-4);
+  overflow-wrap: anywhere;
+}
+a { color: var(--color-accent-400); }
+img { max-width: 100%; height: auto; }
+button, input, select, textarea { font: inherit; color: inherit; }
+/* Product titles can be one 120-character word. They wrap instead of scrolling the page. */
+.card-title { overflow-wrap: anywhere; }
+:focus-visible { outline: 3px solid var(--color-accent-300); outline-offset: 2px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}

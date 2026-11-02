@@ -34,9 +34,9 @@ def test_no_schedule_trigger_anywhere():
         assert "schedule" not in (yaml.safe_load(wf.read_text()).get(True) or {})   # PyYAML reads `on:` as True
 
 
-def test_deploy_runs_only_on_a_push_to_main_after_both_test_jobs():
+def test_deploy_runs_only_on_a_push_to_main_after_every_test_job():
     deploy = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())["jobs"]["deploy"]
-    assert set(deploy["needs"]) == {"test", "edge"}
+    assert set(deploy["needs"]) == {"test", "edge", "frontend"}
     assert deploy["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'push'"
     assert deploy["permissions"] == {"contents": "read", "id-token": "write"}
 
@@ -94,3 +94,15 @@ def test_ci_pushes_a_single_manifest():
     # policy counts each digest as a version.
     steps = _deploy_steps()
     assert steps[_index(steps, "docker/build-push-action")]["with"]["provenance"] is False
+
+
+def test_frontend_job_runs_the_browser_suite_and_keeps_the_report():
+    job = yaml.safe_load(Path(".github/workflows/ci.yml").read_text())["jobs"]["frontend"]
+    assert job["defaults"]["run"]["working-directory"] == "frontend"
+    steps = job["steps"]
+    node = steps[_index(steps, "actions/setup-node")]
+    assert str(node["with"]["node-version"]) == "22"
+    runs = [s.get("run", "") for s in steps]
+    assert "npm ci" in runs and "npx playwright install --with-deps chromium" in runs and "npx playwright test" in runs
+    upload = steps[_index(steps, "actions/upload-artifact")]
+    assert upload["if"] == "failure()" and upload["with"]["path"] == "frontend/playwright-report"

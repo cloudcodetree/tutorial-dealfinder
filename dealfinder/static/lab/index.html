@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealFinder — the lab</title>
+<!-- The server fills both: the API base ("/api" behind the deals Worker, "" on :8000)
+     and whether any live store source is on. -->
+<meta name="api-base" content="">
+<meta name="live-data" content="off">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/lab/lab.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">DealFinder<span>.</span></div>
+      <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">the course lab · wired to live endpoints</span>
+      <span class="pill">free tier</span>
+      <button class="btn btn-secondary" id="acct" type="button">Sign in</button>
+      <div id="signin" class="signin" hidden>
+        <form id="signinEmail">
+          <label class="mono" for="signinAddr">Email me a sign-in link</label>
+          <input id="signinAddr" type="email" required autocomplete="email" placeholder="you@example.com">
+          <button class="btn btn-secondary" type="submit">Send link</button>
+        </form>
+        <button class="btn btn-secondary" type="button" data-provider="google">Continue with Google</button>
+        <button class="btn btn-secondary" type="button" data-provider="github">Continue with GitHub</button>
+        <div id="signinMsg" class="mono" role="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="rail" id="rail">
+      <div class="rail-group">
+        <h6>Find</h6>
+        <button class="rail-item active" data-mode="deals"><span class="bar"></span>Live deals<span class="count" id="dealsCount"></span></button>
+        <button class="rail-item" data-mode="stream"><span class="bar"></span>Live stream</button>
+        <button class="rail-item" data-mode="watchlist"><span class="bar"></span>Watchlist<span class="count" id="wlCount"></span></button>
+        <button class="rail-item" data-mode="semantic"><span class="bar"></span>By meaning</button>
+        <button class="rail-item" data-mode="ask"><span class="bar"></span>Ask the agent</button>
+        <button class="rail-item" data-mode="context"><span class="bar"></span>Context window</button>
+        <button class="rail-item" data-mode="review"><span class="bar"></span>Writer / reviewer</button>
+      </div>
+      <div class="rail-group">
+        <h6>Model</h6>
+        <button class="rail-item" data-mode="dataset"><span class="bar"></span>Dataset</button>
+        <button class="rail-item" data-mode="pipeline"><span class="bar"></span>Pipeline</button>
+        <button class="rail-item" data-mode="models"><span class="bar"></span>Models</button>
+        <button class="rail-item" data-mode="tracking"><span class="bar"></span>Tracking</button>
+        <button class="rail-item" data-mode="evals"><span class="bar"></span>Evals</button>
+        <button class="rail-item" data-mode="mlops"><span class="bar"></span>MLOps loop</button>
+      </div>
+      <div class="rail-group">
+        <h6>Guard</h6>
+        <button class="rail-item" data-mode="safety"><span class="bar"></span>Safety</button>
+        <button class="rail-item" data-mode="compliance"><span class="bar"></span>Compliance</button>
+      </div>
+      <div class="rail-group">
+        <h6>Serve</h6>
+        <button class="rail-item" data-mode="inference"><span class="bar"></span>Inference</button>
+        <button class="rail-item" data-mode="ops"><span class="bar"></span>Cost &amp; drift</button>
+      </div>
+      <div class="rail-group">
+        <h6>Ship</h6>
+        <button class="rail-item" data-mode="auth"><span class="bar"></span>Auth</button>
+        <button class="rail-item" data-mode="billing"><span class="bar"></span>Billing</button>
+        <button class="rail-item" data-mode="suggestions"><span class="bar"></span>Saved searches</button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="searchrow">
+        <input class="input" id="q" value="noise cancelling headphones" placeholder="Search an item…">
+        <button class="btn btn-primary" id="go" style="min-height:48px;padding-inline:20px;">Search</button>
+      </div>
+      <div class="metaline" id="meta"></div>
+      <div class="metaline" id="sourcesLine"></div>
+
+      <!-- DEALS (1b) -->
+      <section id="view-deals">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Ranked by value</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">two-signal score · median + model residual</span>
+        </div>
+        <div class="results" id="results"><div class="loading">Loading real offers…</div></div>
+      </section>
+
+      <!-- STREAM (Part 18 · server-sent events) -->
+      <section id="view-stream" class="hidden">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Offers as each source lands</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">server-sent events · /search/stream</span>
+        </div>
+        <div class="results" id="streamResults"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- PIPELINE (1c) -->
+      <section id="view-pipeline" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 20 · pipelines &amp; orchestration</h6>
+          <h3>A query runs through the system, left to right</h3>
+          <p class="muted">The real five-stage data pipeline, its data-contract gate, and the label distribution it produces — live from <span class="mono">/pipeline</span>.</p>
+        </div>
+        <div class="stages" id="stages"><div class="loading">Loading pipeline…</div></div>
+        <div style="margin-top:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);">
+          <h5>Label distribution <span class="mono muted" style="font-size:11px;">· 270 rows, two-signal verdict</span></h5>
+          <div class="dist" id="dist"></div>
+          <div class="legend" id="distLegend"></div>
+        </div>
+      </section>
+
+      <!-- EVALS (1c inspector) -->
+      <section id="view-evals" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 23 · evaluation harness</h6>
+          <h3>The gate that stops a regression merging</h3>
+          <p class="muted">Precision@5 on the hand-labelled golden set, both rankers — live from <span class="mono">/evals</span>.</p>
+        </div>
+        <div class="gridcards" id="evalCards"><div class="loading">Loading evals…</div></div>
+        <div class="two" id="evalTop" style="margin-top:var(--space-8);"></div>
+        <p class="muted" id="evalNote" style="max-width:78ch;margin-top:var(--space-6);font-size:14px;"></p>
+      </section>
+
+      <!-- MODELS (Part 21) -->
+      <section id="view-models" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 21 · models &amp; deep learning</h6>
+          <h3>Linear vs GBDT+embeddings — the real MAE win</h3>
+          <p class="muted">Fit on the frozen snapshot, live from <span class="mono">/models</span> (needs the full-ML profile).</p>
+        </div>
+        <div class="gridcards" id="modelCards"><div class="loading">Loading models…</div></div>
+        <p class="muted" id="modelNote" style="max-width:78ch;margin-top:var(--space-6);font-size:14px;"></p>
+      </section>
+
+      <!-- TRACKING (Part 22) -->
+      <section id="view-tracking" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 22 · experiment tracking &amp; registry</h6>
+          <h3>The run ledger and the registered winner</h3>
+          <p class="muted">Five runs on the fair-price feature contract, live from <span class="mono">/tracking</span> (needs the full-ML profile).</p>
+        </div>
+        <div class="gridcards" id="trackCards"><div class="loading">Loading tracking…</div></div>
+        <div id="trackTable" style="margin-top:var(--space-8);"></div>
+      </section>
+
+      <!-- BY MEANING (semantic) -->
+      <section id="view-semantic" class="hidden">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Nearest by meaning</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">vector similarity · pgvector</span>
+        </div>
+        <div class="results" id="semResults"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- ASK (RAG) -->
+      <section id="view-ask" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">RAG · grounded answers</h6>
+          <h3>Ask the agent</h3>
+          <p class="muted">Retrieve real listings, then generate an answer grounded in them — live from <span class="mono">/ask</span>.</p>
+          <label class="mono" style="font-size:12px;"><input type="checkbox" id="agentic"> agentic: re-query when the evidence is thin (<span class="mono">/ask_agentic</span>)</label>
+        </div>
+        <div id="askBody"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- WATCHLIST (P1 consumer core) -->
+      <section id="view-watchlist" class="hidden">
+        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
+          <h4>Your watchlist</h4>
+          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">we flag it when the price drops to your target</span>
+        </div>
+        <div class="results" id="wlBody"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- GENERIC INSPECTOR (dataset/mlops/safety/inference/ops/auth/billing/compliance/review/context/suggestions) -->
+      <section id="view-generic" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 id="genKicker" style="color:var(--color-accent);"></h6>
+          <h3 id="genTitle"></h3>
+          <p class="muted" id="genSub"></p>
+        </div>
+        <div id="trapRow" class="mono" style="font-size:12px;margin-bottom:var(--space-4);" hidden>
+          <label><input type="checkbox" id="trap"> inject a writer fooled by the $46 Bose trap (watch the reviewer catch it)</label>
+        </div>
+        <div id="genBody"><div class="loading">Loading…</div></div>
+      </section>
+    </main>
+  </div>
+
+<!-- The package's own UMD file (byte-identical to the npm tarball), pinned by SRI. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
+<script src="/lab/lab.js"></script>
+</body>
+</html>
