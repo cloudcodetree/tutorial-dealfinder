@@ -203,3 +203,14 @@ def test_scrub_strips_queries_from_exception_and_log_text():
           "logentry": {"message": "fetch https://y/search?q=secret", "formatted": "fetch https://y/search?q=secret"},
           "message": "GET /check?title=secret"}
     assert "secret" not in json.dumps(scrub_event(ev, {}))
+
+
+def test_outgoing_urls_lose_search_terms_carried_in_the_path():
+    # Best Buy puts the search in the path: /v1/products(search=secret&categoryPath.id=x).
+    crumb = scrub_breadcrumb({"category": "httplib", "data": {
+        "url": "https://api.bestbuy.com/v1/products(search=secret%20tv)"}}, {})
+    ev = scrub_event({"type": "transaction", "spans": [{
+        "description": "GET https://api.bestbuy.com/v1/products((search=secret)&(sku=1))?apiKey=K",
+        "data": {"url": "https://api.bestbuy.com/v1/products(search=secret)"}}]}, {})
+    out = json.dumps([crumb, ev])
+    assert "secret" not in out and "api.bestbuy.com/v1/products" in out

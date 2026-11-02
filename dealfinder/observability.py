@@ -39,6 +39,10 @@ DAILY_CAPS = {"BestBuy": 50_000, "workers-ai-neurons": 10_000, "resend": 100}
 _SECRET_HEADERS = {"authorization", "cookie", "x-dealfinder-edge", "cf-connecting-ip",
                    "x-forwarded-for", "x-real-ip", "true-client-ip", "referer"}
 _QUERY = re.compile(r"\?\S*")
+# Best Buy carries the search in the path, as /v1/products(search=…). Every
+# parenthesized URL segment is redacted, and so is everything after it.
+_PATH_ARGS = re.compile(r"\(.*$")
+_URL = re.compile(r"https?://\S+")
 # Keys whose values never leave the process: the sentry_sdk scrubber blanks them
 # anywhere in an event (request, extra, contexts), on top of its own default list.
 _DENY_KEYS = ["q", "query", "title", "messages", "prompt", "key", "api_key", "apikey", "token"]
@@ -151,7 +155,11 @@ GUARD = CallRateGuard()
 
 # ── Sentry ──────────────────────────────────────────────────────────────────
 def _strip(url):
-    return url.split("?", 1)[0].split("#", 1)[0] if isinstance(url, str) else url
+    """A URL without its query, fragment, or any parenthesized path arguments."""
+    if not isinstance(url, str):
+        return url
+    url = url.split("?", 1)[0].split("#", 1)[0]
+    return _PATH_ARGS.sub("(<redacted>)", url)
 
 
 def _scrub_data(data) -> None:
@@ -165,7 +173,10 @@ def _scrub_data(data) -> None:
 
 
 def _scrub_text(value):
-    return _QUERY.sub("", value) if isinstance(value, str) else value
+    """Text with every URL in it stripped, and any other "?…" run removed."""
+    if not isinstance(value, str):
+        return value
+    return _QUERY.sub("", _URL.sub(lambda m: _strip(m.group(0)), value))
 
 
 def scrub_breadcrumb(crumb: dict, hint: dict) -> dict:
