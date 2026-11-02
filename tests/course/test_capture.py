@@ -1,5 +1,6 @@
 """course/tools/capture.py and check.py: outputs captured in a clean env, drift caught,
 durations ignored, learner checkpoints."""
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -154,7 +155,10 @@ def test_check_cli_names_the_reference_on_failure(tmp_step, capsys):
 
 def test_make_check_without_a_step_prints_usage():
     make = "/usr/bin/make" if Path("/usr/bin/make").exists() else "make"
-    r = subprocess.run([make, "-s", "check"], capture_output=True, text=True, cwd=Path(__file__).resolve().parents[2])
+    # The course-steps job sets STEP for its own make calls; make would read it from the env.
+    env = {k: v for k, v in os.environ.items() if k != "STEP"}
+    r = subprocess.run([make, "-s", "check"], capture_output=True, text=True, cwd=Path(__file__).resolve().parents[2],
+                       env=env)
     assert r.returncode == 2 and "usage: make check STEP=NN" in r.stdout
 
 

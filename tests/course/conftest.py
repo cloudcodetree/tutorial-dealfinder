@@ -20,6 +20,14 @@ _GIT_ENV = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _git_identity(monkeypatch):
+    """The tools call git in-process (retag writes annotated tags), so the fixed
+    identity has to be in os.environ too. A CI runner has no git identity at all."""
+    for key, value in _GIT_ENV.items():
+        monkeypatch.setenv(key, value)
+
+
 class GitRepo:
     def __init__(self, path: Path):
         self.path = path
