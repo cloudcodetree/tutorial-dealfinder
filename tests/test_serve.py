@@ -667,3 +667,87 @@ def test_health_alias_answers_without_the_edge_header(monkeypatch):
     monkeypatch.setenv("EDGE_SHARED_SECRET", "s3cret")
     r = client.get("/health")
     assert r.status_code == 200 and r.json() == {"status": "ok"}
+
+
+# ── /ask: cached, labelled, capped (Plan 5 Task 8) ──────────────────────────
+from dealfinder.cache import TTLCache  # noqa: E402
+from dealfinder.rag import RagAnswer  # noqa: E402
+
+FAKE_ANSWER = RagAnswer(answer="Best value: X at $10.00", sources=["a"], grounded=True, used_llm=False)
+FAKE_LLM_ANSWER = RagAnswer(answer="X is the best value at $10.00.", sources=["a"], grounded=True, used_llm=True)
+
+
+class FakeClock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, s):
+        self.t += s
+
+
+@pytest.fixture
+def fresh_ask(monkeypatch):
+    monkeypatch.setattr(serve, "_ASK_CACHE", TTLCache())
+    monkeypatch.setattr(serve, "_ASK_LLM_COUNT", serve._DailyCount())
+
+
+def test_ask_answers_are_cached_with_ttl(monkeypatch, fresh_ask):
+    clock = FakeClock()
+    calls = []
+    monkeypatch.setattr(serve, "_ASK_CACHE", TTLCache(ttl_s=900, clock=clock))
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: calls.append(q) or FAKE_ANSWER)
+    client.get("/ask", params={"q": "tv"})
+    client.get("/ask", params={"q": "  TV "})
+    clock.advance(901)
+    client.get("/ask", params={"q": "tv"})
+    assert len(calls) == 2
+
+
+def test_ask_cache_keys_hold_no_query_text(monkeypatch, fresh_ask):
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: FAKE_ANSWER)
+    client.get("/ask", params={"q": "secret tv"})
+    keys = list(serve._ASK_CACHE.keys())
+    assert keys and not any("secret" in str(k) for k in keys)
+
+
+def test_ask_marks_ai_written(monkeypatch, fresh_ask):
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: FAKE_LLM_ANSWER)
+    body = client.get("/ask", params={"q": "tv"}).json()
+    assert body["ai_written"] is True and "provider" in body
+
+
+def test_ask_deterministic_answer_is_not_ai_written(monkeypatch, fresh_ask):
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: FAKE_ANSWER)
+    body = client.get("/ask", params={"q": "tv"}).json()
+    assert (body["ai_written"], body["provider"]) == (False, None)
+
+
+def test_ask_daily_cap_falls_back_to_the_deterministic_path(monkeypatch, fresh_ask):
+    monkeypatch.setenv("ASK_LLM_DAILY_MAX", "2")
+    monkeypatch.setattr("dealfinder.llm.available", lambda: True)
+    monkeypatch.setattr("dealfinder.llm.provider", lambda: "workers-ai")
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: FAKE_LLM_ANSWER)
+    monkeypatch.setattr("dealfinder.rag.deterministic_answer", lambda q, k=5: FAKE_ANSWER)
+    written = [client.get("/ask", params={"q": f"tv {n}"}).json()["ai_written"] for n in range(4)]
+    assert written == [True, True, False, False]
+
+
+def test_ask_has_the_strictest_limit(monkeypatch, fresh_ask):
+    monkeypatch.setenv("DEALFINDER_RATELIMIT", "on")
+    monkeypatch.setenv("EDGE_SHARED_SECRET", "s")      # the limiter trusts CF-Connecting-IP only behind the edge
+    monkeypatch.setattr(serve, "_limiter", serve.ratelimit.Limiter())
+    monkeypatch.setattr("dealfinder.rag.answer", lambda q, k=5: FAKE_ANSWER)
+    monkeypatch.setattr(serve, "_DB", False)
+    monkeypatch.setattr(serve.shop, "aggregate", lambda q: {"results": [], "sources_live": []})
+    monkeypatch.setattr(serve.shop, "ebay_box", lambda q, limit=6: {"enabled": False, "note": "", "items": []})
+
+    def allowed(path, ip):
+        for n in range(200):
+            r = client.get(path, params={"q": f"tv {n}"}, headers={"CF-Connecting-IP": ip, "X-DealFinder-Edge": "s"})
+            if r.status_code == 429:
+                return n
+        return 200
+    assert allowed("/ask", "198.51.100.1") < allowed("/search", "198.51.100.2")

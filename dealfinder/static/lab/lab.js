@@ -362,7 +362,7 @@ async function loadAsk(){
     const badge = d.grounded?'<span class="tag tag-deal">grounded ✓</span>':'<span class="tag tag-susp">ungrounded</span>';
     $('#askBody').innerHTML = `
       <div class="card" style="flex-direction:column;align-items:stretch;gap:var(--space-3);">
-        <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;">${badge}<span class="tag tag-fair">${d.used_llm?'LLM':'deterministic'}</span><span class="mono" style="font-size:11px;color:var(--color-neutral-600);margin-left:auto;">${d.sources.length} sources</span></div>
+        <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;">${badge}<span class="tag tag-fair">${d.ai_written?'AI-written':'deterministic'}</span><span class="mono" style="font-size:11px;color:var(--color-neutral-600);margin-left:auto;">${d.sources.length} sources</span></div>
         <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;">${esc(d.answer)}</div>
         ${d.hops ? `<ol class="mono" style="font-size:11px;color:var(--color-neutral-500);margin:0;padding-left:var(--space-6);">${d.hops.map(h=>`<li>${esc(h.query)} · ${h.sufficient?'enough evidence':'too thin'} · ${esc(h.reason)}</li>`).join('')}</ol>` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">${d.sources.map(s=>`<span class="mono" style="font-size:10px;color:var(--color-neutral-600);border:1px solid var(--color-neutral-800);border-radius:5px;padding:2px 7px;">${esc(s)}</span>`).join('')}</div>

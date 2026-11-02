@@ -27,6 +27,9 @@ _KEYS = [
     "EBAY_APP_ID",
     "EBAY_CERT_ID",
     "EBAY_CAMPAIGN_ID",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_AI_TOKEN",
+    "SENTRY_DSN",
     # Behavior switches, not keys, but a value in .env would flip the same branches.
     "DEALFINDER_SOURCES",
     "DEALFINDER_VERDICT_MODE",

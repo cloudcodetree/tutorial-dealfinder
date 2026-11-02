@@ -6,6 +6,7 @@ discussed in the tutorial; this is the shape they hang off.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -13,6 +14,7 @@ import math
 import os
 import re
 import statistics
+import threading
 import time
 import uuid
 from functools import lru_cache
@@ -28,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from . import db, licensing, live_sources, migrate, observability, pgstore, ratelimit, shop
 from .aggregate import aggregate
 from .auth import User, require_user
+from .cache import TTLCache
 from .deal import deal_score
 from .dealscore import fair_price
 from .features import featurize
@@ -546,24 +549,58 @@ def semantic(q: str, k: int = 12, who: Principal = Depends(current_principal)):
     return {"query": q, "count": len(results), "results": results, "backend": "snapshot"}
 
 
+class _DailyCount:
+    """A per-instance count that starts again each UTC day."""
+
+    def __init__(self):
+        self._day, self._n, self._lock = None, 0, threading.Lock()
+
+    def take(self, limit: int) -> bool:
+        """Count one more if under `limit`. False once the day's limit is spent."""
+        from datetime import datetime, timezone
+        with self._lock:
+            today = datetime.now(timezone.utc).date()
+            if today != self._day:
+                self._day, self._n = today, 0
+            if self._n >= limit:
+                return False
+            self._n += 1
+            return True
+
+
+# Prices change, so a cached answer expires. The key is a hash: no query text is kept.
+_ASK_CACHE = TTLCache(ttl_s=float(os.getenv("ASK_CACHE_TTL_S", "900")))
+# LLM-written answers per instance per day. Past the cap, asks take the deterministic
+# path, which leaves headroom in Workers AI's shared 10,000-neuron allocation.
+_ASK_LLM_COUNT = _DailyCount()
+
+
+def _ask_key(q: str, k: int) -> str:
+    return hashlib.sha256((" ".join(q.split()).lower() + "|" + str(k)).encode()).hexdigest()
+
+
 @app.get("/ask")
 def ask(q: str, k: int = 5):
-    """RAG: retrieve real listings for the query, then GENERATE a grounded answer.
+    """RAG: retrieve real listings for the query, then generate a grounded answer.
 
-    Returns the `RagAnswer` — the synthesized answer, the retrieved item ids it
-    used as `sources`, whether it passed the faithfulness check (`grounded`), and
-    whether an LLM produced it (`used_llm`). With no OPENROUTER_API_KEY the
-    deterministic extractive path answers, so this route works fully offline."""
-    from .rag import answer as rag_answer
+    Returns the answer, the retrieved item ids it used (`sources`), whether it passed
+    the faithfulness check (`grounded`), and whether a model wrote it (`used_llm`,
+    `ai_written`, `provider`). With no LLM provider, or past the daily cap, the
+    deterministic extractive path answers, so this route always works."""
+    from . import llm, rag
 
-    a = rag_answer(q, k=k)
-    return {
-        "query": q,
-        "answer": a.answer,
-        "sources": a.sources,
-        "grounded": a.grounded,
-        "used_llm": a.used_llm,
-    }
+    key = _ask_key(q, k)
+    cached = _ASK_CACHE.get(key)
+    if cached is not None:
+        return {"query": q, **cached}
+    if llm.available() and not _ASK_LLM_COUNT.take(int(os.getenv("ASK_LLM_DAILY_MAX", "300"))):
+        a = rag.deterministic_answer(q, k=k)
+    else:
+        a = rag.answer(q, k=k)
+    body = {"answer": a.answer, "sources": a.sources, "grounded": a.grounded, "used_llm": a.used_llm,
+            "ai_written": a.used_llm, "provider": llm.provider() if a.used_llm else None}
+    _ASK_CACHE.put(key, body)
+    return {"query": q, **body}
 
 
 @app.get("/ask_agentic")
