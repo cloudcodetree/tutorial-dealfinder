@@ -4,6 +4,8 @@
     python course/tools/steps.py verify [--repo .] [--branch course]
     python course/tools/steps.py matrix --json [--repo .] [--branch course]
     python course/tools/steps.py manifest NN --json [--repo .]
+    python course/tools/steps.py retag [--prefix step-] [--apply] [--prune] [--push]
+    python course/tools/steps.py release-check [--main main]
 
 `course` is orphan-rooted and linear. Commit N is `step-NN: …`, adds
 `course/steps/NN.toml`, and has exactly one parent (the root has none). `verify`
@@ -226,6 +228,133 @@ def verify(repo: Path, branch: str = "course") -> list[str]:
     return []
 
 
+# ── tags ────────────────────────────────────────────────────────────────────
+RELEASE_TAG = "course-v1"
+
+
+class RetagRefused(Exception):
+    pass
+
+
+@dataclass
+class RetagReport:
+    create: list[tuple[str, str]] = field(default_factory=list)          # (tag, commit)
+    move: list[tuple[str, str, str]] = field(default_factory=list)       # (tag, old commit, new commit)
+    keep: list[str] = field(default_factory=list)
+    delete: list[str] = field(default_factory=list)
+
+
+def _local_tags(repo: Path, prefix: str) -> dict[str, tuple[str, str, str]]:
+    """{tag: (object type, ref value, commit it points at)} for tags named <prefix>NN."""
+    out = _git(repo, "for-each-ref", "--format=%(refname:short)%00%(objecttype)%00%(objectname)%00%(*objectname)",
+               f"refs/tags/{prefix}*")
+    tags = {}
+    for line in out.splitlines():
+        name, kind, value, peeled = line.split("\x00")
+        if re.fullmatch(re.escape(prefix) + r"\d{2}", name):
+            tags[name] = (kind, value, peeled or value)
+    return tags
+
+
+def _remote_tags(repo: Path, remote: str, pattern: str) -> dict[str, str]:
+    if remote not in _git(repo, "remote").split():
+        return {}
+    out = _git(repo, "ls-remote", "--tags", remote, pattern)
+    return {ref.removeprefix("refs/tags/"): sha for sha, ref in (line.split("\t") for line in out.splitlines())
+            if not ref.endswith("^{}")}
+
+
+def _refuse_if_released(repo: Path, remote: str, check_remote: bool) -> None:
+    if _git(repo, "tag", "--list", RELEASE_TAG).strip():
+        raise RetagRefused(f"{RELEASE_TAG} exists: step tags are frozen")
+    if check_remote and _remote_tags(repo, remote, f"refs/tags/{RELEASE_TAG}"):
+        raise RetagRefused(f"{RELEASE_TAG} exists on {remote}: step tags are frozen")
+
+
+def _tag_object(repo: Path, name: str, commit: str, message: str) -> str:
+    ident = _git(repo, "var", "GIT_COMMITTER_IDENT").strip()
+    text = f"object {commit}\ntype commit\ntag {name}\ntagger {ident}\n\n{message}\n"
+    return subprocess.run(["git", "-C", str(repo), "mktag"], input=text, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def retag(repo: Path, branch: str = "course", *, prefix: str = "step-", apply: bool = False,
+          prune: bool = False, push: bool = False, remote: str = "origin") -> RetagReport:
+    """Point one annotated tag per step at its step commit, all at once or not at all.
+
+    A dry run by default. `apply` writes every tag object, then changes every ref in
+    one `git update-ref --stdin` transaction. `prune` deletes <prefix>NN tags with no
+    step. `push` makes the remote's step tags match the local ones in one atomic push."""
+    if push and not apply:
+        raise RetagRefused("--push needs --apply")
+    _refuse_if_released(repo, remote, check_remote=apply)
+    commits = chain(repo, branch)          # raises ChainError before anything changes
+    planned = {f"{prefix}{c.id}": c for c in commits}
+    local = _local_tags(repo, prefix)
+    report = RetagReport()
+    for name, c in planned.items():
+        have = local.get(name)
+        if have is None:
+            report.create.append((name, c.sha))
+        elif have[0] != "tag" or have[2] != c.sha:
+            report.move.append((name, have[2], c.sha))
+        else:
+            report.keep.append(name)
+    if prune:
+        report.delete = sorted(t for t in local if t not in planned)
+    if not apply:
+        return report
+
+    lines = []
+    for name, sha in report.create:
+        lines.append(f"create refs/tags/{name} {_tag_object(repo, name, sha, planned[name].subject)}")
+    for name, _old, sha in report.move:
+        lines.append(f"update refs/tags/{name} {_tag_object(repo, name, sha, planned[name].subject)} {local[name][1]}")
+    for name in report.delete:
+        lines.append(f"delete refs/tags/{name} {local[name][1]}")
+    if lines:
+        subprocess.run(["git", "-C", str(repo), "update-ref", "--stdin"], input="\n".join(lines) + "\n",
+                       check=True, capture_output=True, text=True)
+    if push:
+        now = _local_tags(repo, prefix)
+        there = _remote_tags(repo, remote, f"refs/tags/{prefix}*")
+        refs = [f"refs/tags/{t}:refs/tags/{t}" for t in sorted(planned) if there.get(t) != now[t][1]]
+        if prune:
+            refs += [f":refs/tags/{t}" for t in sorted(there) if re.fullmatch(re.escape(prefix) + r"\d{2}", t)
+                     and t not in planned]
+        if refs:
+            _git(repo, "push", "--atomic", "--force", "--quiet", remote, *refs)
+    return report
+
+
+def release_check(repo: Path, branch: str = "course", main: str = "main") -> list[str]:
+    """Everything that must hold before `course` replaces `main`. Runs nothing remote."""
+    problems = list(verify(repo, branch))
+    try:
+        _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{main}")
+    except subprocess.CalledProcessError:
+        return problems + [f"no branch {main!r}"]
+    if subprocess.run(["git", "-C", str(repo), "diff", "--quiet", main, branch, "--"]).returncode != 0:
+        problems.append(f"{branch} tip tree differs from {main}")
+    if _git(repo, "tag", "--list", RELEASE_TAG).strip():
+        problems.append(f"{RELEASE_TAG} already exists")
+    if not problems:
+        plan = retag(repo, branch)
+        if plan.create or plan.move:
+            problems.append("step tags do not match the step commits: run retag --apply first")
+    return problems
+
+
+def _release_commands(repo: Path, branch: str, main: str) -> list[str]:
+    last = chain(repo, branch)[-1].sha
+    go = "   # owner go: reply 'you do it'"
+    return [f"git tag -a archive/pre-course-v1 origin/{main} -m 'main before course-v1'"
+            f" && git push origin archive/pre-course-v1{go}",
+            f"git push --force-with-lease={main} origin {branch}:{main}{go}",
+            f"python course/tools/steps.py retag --apply --prune --push{go}",
+            f"git tag -a {RELEASE_TAG} {last} -m 'course v1' && git push origin {RELEASE_TAG}{go}"]
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 def _jsonable(manifest: StepManifest) -> dict:
     out = asdict(manifest)
@@ -239,14 +368,47 @@ def _jsonable(manifest: StepManifest) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("verify", "matrix", "manifest"):
+    for name in ("verify", "matrix", "manifest", "retag", "release-check"):
         p = sub.add_parser(name)
         p.add_argument("--repo", type=Path, default=Path("."))
         p.add_argument("--branch", default="course")
-        if name != "verify":
+        if name in ("matrix", "manifest"):
             p.add_argument("--json", action="store_true", required=True)
     sub.choices["manifest"].add_argument("nn")
+    rt = sub.choices["retag"]
+    rt.add_argument("--prefix", default="step-")
+    for flag in ("--apply", "--prune", "--push"):
+        rt.add_argument(flag, action="store_true")
+    sub.choices["release-check"].add_argument("--main", default="main")
     args = ap.parse_args(argv)
+
+    if args.cmd == "retag":
+        try:
+            r = retag(args.repo, args.branch, prefix=args.prefix, apply=args.apply, prune=args.prune, push=args.push)
+        except (ChainError, RetagRefused) as e:
+            for problem in getattr(e, "problems", [str(e)]):
+                print(f"✗ {problem}")
+            return 1
+        verb = "" if args.apply else "would "
+        for tag, sha in r.create:
+            print(f"{verb}create {tag} → {sha[:7]}")
+        for tag, old, new in r.move:
+            print(f"{verb}move {tag} {old[:7]} → {new[:7]}")
+        for tag in r.keep:
+            print(f"keep {tag}")
+        for tag in r.delete:
+            print(f"{verb}delete {tag}")
+        return 0
+    if args.cmd == "release-check":
+        problems = release_check(args.repo, args.branch, args.main)
+        for problem in problems:
+            print(f"✗ {problem}")
+        if problems:
+            return 1
+        print("✓ ready. The release commands, in order (this script runs none of them):")
+        for line in _release_commands(args.repo, args.branch, args.main):
+            print(f"  {line}")
+        return 0
 
     if args.cmd == "manifest":
         try:

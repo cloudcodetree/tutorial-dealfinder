@@ -54,3 +54,15 @@ def git_repo(tmp_path) -> GitRepo:
     repo = GitRepo(tmp_path)
     repo.git("init", "-q", "-b", "course")
     return repo
+
+
+@pytest.fixture
+def git_repo_with_origin(tmp_path) -> GitRepo:
+    """A course repo whose `origin` is a bare repo beside it."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, env={**os.environ, **_GIT_ENV})
+    repo = GitRepo(tmp_path / "work")
+    repo.path.mkdir()
+    repo.git("init", "-q", "-b", "course")
+    repo.git("remote", "add", "origin", str(origin))
+    return repo
