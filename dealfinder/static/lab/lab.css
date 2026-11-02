@@ -12,6 +12,11 @@
   --shadow-sm:0 0 0 1px #3f424d; --shadow-md:0 0 0 1px #595d6c,0 6px 18px rgba(0,0,0,.55);
   --shadow-lg:0 0 0 1px #9397ab,0 16px 40px rgba(0,0,0,.65);
   --ok:#7fd6a3; --warn:#e6b566;
+  /* Verdict badges, copied from frontend/src/theme/tokens.css (the source of truth). */
+  --verdict-deal-fg:#7fd6a3; --verdict-deal-bg:#16301f;
+  --verdict-fair-fg:#c9ccd9; --verdict-fair-bg:#2e3040;
+  --verdict-suspicious-fg:#e6b566; --verdict-suspicious-bg:#3a2a10;
+  --verdict-overpriced-fg:#f2a7a7; --verdict-overpriced-bg:#3d2026;
 }
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;}
