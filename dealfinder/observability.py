@@ -39,6 +39,12 @@ DAILY_CAPS = {"BestBuy": 50_000, "workers-ai-neurons": 10_000, "resend": 100}
 _SECRET_HEADERS = {"authorization", "cookie", "x-dealfinder-edge", "cf-connecting-ip",
                    "x-forwarded-for", "x-real-ip", "true-client-ip", "referer"}
 _QUERY = re.compile(r"\?\S*")
+# Keys whose values never leave the process: the sentry_sdk scrubber blanks them
+# anywhere in an event (request, extra, contexts), on top of its own default list.
+_DENY_KEYS = ["q", "query", "title", "messages", "prompt", "key", "api_key", "apikey", "token"]
+# Span and breadcrumb data keys that hold an outgoing request's query or fragment.
+# Best Buy's API key travels in its query string.
+_HTTP_QUERY_KEYS = ("http.query", "http.fragment", "url.query", "url.fragment")
 
 
 # ── cost ────────────────────────────────────────────────────────────────────
@@ -148,14 +154,24 @@ def _strip(url):
     return url.split("?", 1)[0].split("#", 1)[0] if isinstance(url, str) else url
 
 
+def _scrub_data(data) -> None:
+    if not isinstance(data, dict):
+        return
+    for key in _HTTP_QUERY_KEYS:
+        data.pop(key, None)
+    for key in ("url", "from", "to", "http.url", "url.full"):
+        if key in data:
+            data[key] = _strip(data[key])
+
+
+def _scrub_text(value):
+    return _QUERY.sub("", value) if isinstance(value, str) else value
+
+
 def scrub_breadcrumb(crumb: dict, hint: dict) -> dict:
-    data = crumb.get("data")
-    if isinstance(data, dict):
-        for key in ("url", "from", "to"):
-            if key in data:
-                data[key] = _strip(data[key])
-    if isinstance(crumb.get("message"), str):
-        crumb["message"] = _QUERY.sub("", crumb["message"])
+    _scrub_data(crumb.get("data"))
+    if "message" in crumb:
+        crumb["message"] = _scrub_text(crumb["message"])
     return crumb
 
 
@@ -178,6 +194,26 @@ def scrub_event(event: dict, hint: dict) -> dict:
     if isinstance(extra, dict):
         for key in ("q", "query"):
             extra.pop(key, None)
+    # Exceptions: their message text, and every frame's local variables.
+    exc = event.get("exception")
+    for value in (exc.get("values") if isinstance(exc, dict) else None) or []:
+        value["value"] = _scrub_text(value.get("value"))
+        for frame in ((value.get("stacktrace") or {}).get("frames") or []):
+            frame.pop("vars", None)
+    if "message" in event:
+        event["message"] = _scrub_text(event["message"])
+    log = event.get("logentry")
+    if isinstance(log, dict):
+        for key in ("message", "formatted"):
+            log[key] = _scrub_text(log.get(key))
+    # Transactions: every span's outgoing URL and description, and the trace context.
+    for span in event.get("spans") or []:
+        if isinstance(span, dict):
+            span["description"] = _scrub_text(span.get("description"))
+            _scrub_data(span.get("data"))
+    trace = (event.get("contexts") or {}).get("trace")
+    if isinstance(trace, dict):
+        _scrub_data(trace.get("data"))
     return event
 
 
@@ -187,8 +223,12 @@ def init_sentry() -> None:
     if not dsn:
         return
     import sentry_sdk
+    from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 
     sentry_sdk.init(dsn=dsn, send_default_pii=False, traces_sample_rate=0.05,
+                    # Frame locals hold the query, the prompt and API keys. None are collected.
+                    include_local_variables=False,
+                    event_scrubber=EventScrubber(denylist=DEFAULT_DENYLIST + _DENY_KEYS, recursive=True),
                     environment=os.getenv("DEALFINDER_ENV", "development"),
                     release=os.getenv("K_REVISION"),
                     before_send=scrub_event, before_send_transaction=scrub_event,

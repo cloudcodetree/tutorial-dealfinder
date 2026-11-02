@@ -161,3 +161,45 @@ def test_transactions_are_scrubbed_too(monkeypatch):
     monkeypatch.setattr("sentry_sdk.init", lambda **k: called.append(k))
     observability.init_sentry()
     assert called[0]["before_send_transaction"] is scrub_event
+
+
+# ── security review follow-up: frame locals, outgoing HTTP, message text ─────
+def test_sentry_collects_no_local_variables(monkeypatch):
+    monkeypatch.setenv("SENTRY_DSN", "https://public@o0.ingest.us.sentry.io/0")
+    called = []
+    monkeypatch.setattr("sentry_sdk.init", lambda **k: called.append(k))
+    observability.init_sentry()
+    assert called[0]["include_local_variables"] is False
+    denied = called[0]["event_scrubber"].denylist
+    assert {"q", "query", "messages", "prompt", "key", "title"} <= set(denied)
+
+
+def test_scrub_drops_stack_frame_variables():
+    ev = {"exception": {"values": [{"type": "X", "value": "boom", "stacktrace": {"frames": [
+        {"function": "chat", "vars": {"key": "sk-or-secret", "q": "secret tv"}}]}}]}}
+    out = json.dumps(scrub_event(ev, {}))
+    assert "sk-or-secret" not in out and "secret tv" not in out
+
+
+def test_scrub_breadcrumb_drops_outgoing_query_and_fragment():
+    crumb = {"category": "httplib", "data": {"url": "https://api.bestbuy.com/v1/products(search=tv)",
+                                             "http.query": "apiKey=BBKEY123&format=json", "http.fragment": "f"}}
+    out = json.dumps(scrub_breadcrumb(crumb, {}))
+    assert "BBKEY123" not in out and "http.query" not in out
+
+
+def test_scrub_strips_outgoing_urls_from_transaction_spans():
+    ev = {"type": "transaction", "spans": [{
+        "op": "http.client", "description": "GET https://api.bestbuy.com/v1/products?apiKey=BBKEY123",
+        "data": {"url": "https://api.bestbuy.com/v1/products?apiKey=BBKEY123", "http.query": "apiKey=BBKEY123",
+                 "url.query": "apiKey=BBKEY123"}}],
+          "contexts": {"trace": {"data": {"url": "https://x/check?title=secret"}}}}
+    out = json.dumps(scrub_event(ev, {}))
+    assert "BBKEY123" not in out and "secret" not in out
+
+
+def test_scrub_strips_queries_from_exception_and_log_text():
+    ev = {"exception": {"values": [{"type": "HTTPError", "value": "GET https://x/check?title=secret failed"}]},
+          "logentry": {"message": "fetch https://y/search?q=secret", "formatted": "fetch https://y/search?q=secret"},
+          "message": "GET /check?title=secret"}
+    assert "secret" not in json.dumps(scrub_event(ev, {}))
