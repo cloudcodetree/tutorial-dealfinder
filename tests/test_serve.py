@@ -751,3 +751,51 @@ def test_ask_has_the_strictest_limit(monkeypatch, fresh_ask):
                 return n
         return 200
     assert allowed("/ask", "198.51.100.1") < allowed("/search", "198.51.100.2")
+
+
+# ── final review: every LLM route shares the cap, and says when a model wrote it ──
+def _llm_world(monkeypatch, cap):
+    monkeypatch.setenv("ASK_LLM_DAILY_MAX", str(cap))
+    monkeypatch.setattr("dealfinder.llm.available", lambda: True)
+    monkeypatch.setattr("dealfinder.llm.provider", lambda: "workers-ai")
+    used = []
+
+    def answer(q, k=5, *, llm=None, use_db=None):
+        wrote = llm is None or llm.available()
+        used.append(wrote)
+        return FAKE_LLM_ANSWER if wrote else FAKE_ANSWER
+    monkeypatch.setattr("dealfinder.rag.answer", answer)
+    return used
+
+
+def test_ask_agentic_shares_the_cap_and_is_labeled(monkeypatch, fresh_ask):
+    used = _llm_world(monkeypatch, cap=1)
+    first = client.get("/ask_agentic", params={"q": "tv"}).json()
+    second = client.get("/ask_agentic", params={"q": "monitor"}).json()
+    assert used == [True, False]
+    assert (first["ai_written"], first["provider"]) == (True, "workers-ai")
+    assert (second["ai_written"], second["provider"]) == (False, None)
+
+
+def test_review_shares_the_cap_and_is_labeled(monkeypatch, fresh_ask):
+    used = _llm_world(monkeypatch, cap=1)
+    bodies = [client.get("/review", params={"q": q}).json() for q in ("tv", "monitor")]
+    assert used[:1] == [True] and used[1:] and not any(used[1:])
+    for body in bodies:
+        assert body["ai_written"] == (body["draft"]["used_llm"] and not body["revised"])
+        assert body["provider"] == ("workers-ai" if body["ai_written"] else None)
+
+
+def test_one_cap_covers_every_llm_route(monkeypatch, fresh_ask):
+    used = _llm_world(monkeypatch, cap=1)
+    client.get("/ask", params={"q": "tv"})
+    client.get("/ask_agentic", params={"q": "monitor"})
+    assert used == [True, False]
+
+
+def test_a_trap_review_still_runs_past_the_cap(monkeypatch, fresh_ask):
+    # The trap writer is the lesson's own fake LLM: it calls no provider, so the cap
+    # never blocks it.
+    _llm_world(monkeypatch, cap=0)
+    body = client.get("/review", params={"q": "noise cancelling headphones", "trap": "true"}).json()
+    assert body["revised"] is True

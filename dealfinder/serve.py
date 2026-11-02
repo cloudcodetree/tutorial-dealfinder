@@ -594,6 +594,29 @@ _ASK_CACHE = TTLCache(ttl_s=float(os.getenv("ASK_CACHE_TTL_S", "900")))
 _ASK_LLM_COUNT = _DailyCount()
 
 
+class _NoLLM:
+    """Handed to the answer pipeline past the daily cap: it reports no provider, so
+    the deterministic path answers."""
+
+    @staticmethod
+    def available() -> bool:
+        return False
+
+
+def _llm_for_this_request():
+    """None (use the configured provider) while today's cap has room, else _NoLLM.
+    One cap covers every route that can call a model: /ask, /ask_agentic, /review."""
+    from . import llm
+    if llm.available() and not _ASK_LLM_COUNT.take(int(os.getenv("ASK_LLM_DAILY_MAX", "300"))):
+        return _NoLLM()
+    return None
+
+
+def _written_by(used_llm: bool) -> dict:
+    from . import llm
+    return {"ai_written": used_llm, "provider": llm.provider() if used_llm else None}
+
+
 def _ask_key(q: str, k: int) -> str:
     return hashlib.sha256((" ".join(q.split()).lower() + "|" + str(k)).encode()).hexdigest()
 
@@ -606,18 +629,15 @@ def ask(q: str, k: int = 5):
     the faithfulness check (`grounded`), and whether a model wrote it (`used_llm`,
     `ai_written`, `provider`). With no LLM provider, or past the daily cap, the
     deterministic extractive path answers, so this route always works."""
-    from . import llm, rag
+    from . import rag
 
     key = _ask_key(q, k)
     cached = _ASK_CACHE.get(key)
     if cached is not None:
         return {"query": q, **cached}
-    if llm.available() and not _ASK_LLM_COUNT.take(int(os.getenv("ASK_LLM_DAILY_MAX", "300"))):
-        a = rag.deterministic_answer(q, k=k)
-    else:
-        a = rag.answer(q, k=k)
+    a = rag.answer(q, k=k) if _llm_for_this_request() is None else rag.deterministic_answer(q, k=k)
     body = {"answer": a.answer, "sources": a.sources, "grounded": a.grounded, "used_llm": a.used_llm,
-            "ai_written": a.used_llm, "provider": llm.provider() if a.used_llm else None}
+            **_written_by(a.used_llm)}
     _ASK_CACHE.put(key, body)
     return {"query": q, **body}
 
@@ -632,12 +652,13 @@ def ask_agentic(q: str, max_hops: int = 3):
     the sufficiency gate and the corpus-mined reformulator are deterministic."""
     from .agentic_rag import agentic_answer
 
-    a = agentic_answer(q, max_hops=max_hops)
+    a = agentic_answer(q, max_hops=max_hops, llm=_llm_for_this_request())
     return {
         "query": q,
         "answer": a.answer,
         "grounded": a.grounded,
         "used_llm": a.used_llm,
+        **_written_by(a.used_llm),
         "sources": a.sources,
         "hops": [
             {"query": h.query, "sufficient": h.sufficient, "reason": h.reason, "verdicts": h.verdicts}
@@ -673,7 +694,9 @@ def review_multiagent(q: str, k: int = 5, trap: bool = False):
 
     # Pin retrieval to the reproducible snapshot (orchestrate's contract) so the
     # writer/reviewer trail is stable regardless of any attached DATABASE_URL.
-    writer = _TrapWriter() if trap else None
+    # The trap writer is the lesson's own fake model: it calls no provider, so the cap
+    # does not apply to it.
+    writer = _TrapWriter() if trap else _llm_for_this_request()
     draft = orch.recommend(q, k=k, llm=writer)
     draft_review = orch.review(q, draft, k=k)
     if draft_review.approved:
@@ -693,6 +716,8 @@ def review_multiagent(q: str, k: int = 5, trap: bool = False):
         "revised": revised,
         "final": final,
         "final_review": _rv(final_review),
+        # A model wrote what the shopper sees only when its draft was approved as is.
+        **_written_by(draft.used_llm and not revised),
     }
 
 

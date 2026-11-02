@@ -36,3 +36,8 @@ def test_p1_progress_names_its_proofs():
 def test_monetization_is_deferred():
     p3 = Path("ROADMAP.md").read_text().split("### P3", 1)[1].split("### P4", 1)[0]
     assert "Deferred: revenue skipped (owner decision, 2026-10-25)." in p3
+
+
+def test_privacy_box_proves_the_request_log_is_gone_live():
+    box = next(line for line in _gate().splitlines() if line.startswith("- [ ] Privacy"))
+    assert "gcloud logging read" in box and "run.googleapis.com%2Frequests" in box
