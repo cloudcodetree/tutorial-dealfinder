@@ -1,0 +1,68 @@
+name: course-steps
+# One job per step commit on the course branch: each lesson's code must pass its own
+# tests, its learner checkpoint, and reproduce the output the lesson quotes.
+on:
+  push:
+    branches: [course]
+  pull_request:
+    branches: [course]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python course/tools/steps.py verify
+      - id: matrix
+        run: echo "matrix=$(python course/tools/steps.py matrix --json)" >> "$GITHUB_OUTPUT"
+
+  step:
+    needs: plan
+    name: step-${{ matrix.id }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    # The same pgvector as ci.yml. Only steps whose manifest sets needs_db get DATABASE_URL.
+    services:
+      db:
+        image: pgvector/pgvector:0.7.0-pg16
+        env:
+          POSTGRES_USER: dealfinder
+          POSTGRES_PASSWORD: dealfinder
+          POSTGRES_DB: dealfinder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dealfinder -d dealfinder"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      STEP: ${{ matrix.id }}
+      NEEDS_DB: ${{ matrix.needs_db }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - if: env.NEEDS_DB == 'true'
+        run: echo "DATABASE_URL=postgresql://dealfinder:dealfinder@localhost:5432/dealfinder" >> "$GITHUB_ENV"
+      - run: python -m pytest -q
+      - run: make check STEP="$STEP"
+      - run: make capture-check STEP="$STEP"
