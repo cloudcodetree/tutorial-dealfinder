@@ -21,10 +21,10 @@ from typing import Annotated
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, licensing, migrate, pgstore, ratelimit, shop
+from . import db, licensing, live_sources, migrate, pgstore, ratelimit, shop
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -271,13 +271,46 @@ def ranked(q: str, background: BackgroundTasks, k: int = 12,
     }
 
 
-@app.get("/redesign", response_class=HTMLResponse)
-def redesign():
-    """The Nocturne redesign surface (parallel to `/`): grouped-rail mode selector,
-    the 1b value-card deals view, and the 1c pipeline explainer — all wired to the
-    real endpoints (`/ranked`, `/pipeline`, `/evals`). Kept separate from the
-    course's `index.html` so the 37 lessons stay intact until a deliberate migration."""
-    return (Path(__file__).parent / "static" / "redesign.html").read_text()
+_LAB = Path(__file__).parent / "static" / "lab"
+# The only files /lab/{name} serves. Anything else is a 404, so no path reaches the package.
+LAB_ASSETS = {"lab.css": "text/css", "lab.js": "text/javascript", "lessons.json": "application/json"}
+
+
+def _live_data() -> bool:
+    """True when any configured store source can answer. A misconfigured source list
+    reads as off, the same as no key."""
+    try:
+        return any(s.available() for s in live_sources.enabled_sources())
+    except ValueError:
+        return False
+
+
+@app.get("/lab", response_class=HTMLResponse)
+@app.get("/lab/", response_class=HTMLResponse)
+def lab(request: Request) -> HTMLResponse:
+    """The course lab: every course mode on one grouped rail, wired to the real endpoints.
+
+    Behind the deals Worker the backend sits under /api, so the page gets that base when
+    the request carries the edge header. Served directly on :8000 the base is empty."""
+    html = (_LAB / "index.html").read_text()
+    base = "/api" if "x-dealfinder-edge" in request.headers else ""
+    html = html.replace('<meta name="api-base" content="">', f'<meta name="api-base" content="{base}">', 1)
+    html = html.replace('<meta name="live-data" content="off">',
+                        f'<meta name="live-data" content="{"on" if _live_data() else "off"}">', 1)
+    return HTMLResponse(html)
+
+
+@app.get("/lab/{name}")
+def lab_asset(name: str) -> Response:
+    if name not in LAB_ASSETS:
+        raise HTTPException(404, "not found")
+    return Response((_LAB / name).read_bytes(), media_type=LAB_ASSETS[name])
+
+
+@app.get("/redesign")
+def redesign() -> RedirectResponse:
+    """The old Nocturne page lives on as the lab."""
+    return RedirectResponse("/lab", status_code=301)
 
 
 # ── Consumer accounts: the per-user watchlist (P1). Private per user via RLS. ──
@@ -1312,9 +1345,10 @@ def me(user: User = Depends(require_user)):
     return {"id": user.id, "email": user.email, "role": user.role}
 
 
-@app.get("/", response_class=HTMLResponse)
-def home():
-    return (Path(__file__).parent / "static" / "index.html").read_text()
+@app.get("/")
+def home() -> RedirectResponse:
+    """The course's single-page UI is retired. Its modes live in the lab."""
+    return RedirectResponse("/lab", status_code=301)
 
 
 @app.get("/deal/{product_id}")

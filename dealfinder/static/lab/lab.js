@@ -1,322 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DealFinder — Nocturne</title>
-<style>
-/* ── Nocturne tokens (ported from the design system) ───────────────────── */
-:root{
-  --color-bg:#161826; --color-surface:#232532; --color-text:#e9e9ed;
-  --color-accent:#9184d9; --color-divider:color-mix(in srgb,#e9e9ed 16%,transparent);
-  --color-neutral-400:#b2b6ca; --color-neutral-500:#9397ab; --color-neutral-600:#75798c;
-  --color-neutral-800:#3f424d; --color-neutral-900:#292b31;
-  --color-accent-100:#f5f4ff; --color-accent-300:#d2cefd; --color-accent-400:#b5abfc;
-  --color-accent-600:#796cbf; --color-accent-800:#423a6a; --color-accent-900:#2b2741;
-  --font-heading:"Inter",system-ui,sans-serif; --font-body:"Inter",system-ui,sans-serif;
-  --space-1:2.8px; --space-2:5.6px; --space-3:8.4px; --space-4:11.2px; --space-6:16.8px; --space-8:22.4px;
-  --radius-sm:4px; --radius-md:8px; --radius-lg:14px;
-  --shadow-sm:0 0 0 1px #3f424d; --shadow-md:0 0 0 1px #595d6c,0 6px 18px rgba(0,0,0,.55);
-  --shadow-lg:0 0 0 1px #9397ab,0 16px 40px rgba(0,0,0,.65);
-  --ok:#7fd6a3; --warn:#e6b566;
-}
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-*,*::before,*::after{box-sizing:border-box;}
-html,body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);font-size:15px;line-height:1.55;}
-h1,h2,h3,h4,h5,h6{font-family:var(--font-heading);font-weight:500;line-height:1.12;letter-spacing:-.015em;margin:0;}
-h6{font-size:13px;letter-spacing:.08em;text-transform:uppercase;}
-a{color:var(--color-accent);text-decoration:none;} a:hover{color:var(--color-accent-400);}
-.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;}
-.muted{color:var(--color-neutral-500);}
-button{font:inherit;cursor:pointer;}
-
-/* ── shell ─────────────────────────────────────────────────────────────── */
-.topbar{position:sticky;top:0;z-index:30;background:var(--color-bg);
-  background-image:linear-gradient(to right,transparent,var(--color-divider) 48px,var(--color-divider) calc(100% - 48px),transparent);
-  background-repeat:no-repeat;background-position:bottom;background-size:100% 1px;}
-.topbar-inner{position:relative;display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-8);}
-.brand{font-family:var(--font-heading);font-weight:500;font-size:18px;letter-spacing:-.015em;margin-right:auto;}
-.brand span{color:var(--color-accent);}
-.signin{position:absolute;right:var(--space-8);top:100%;display:flex;flex-direction:column;gap:var(--space-3);
-  width:280px;padding:var(--space-4);background:var(--color-surface);border:1px solid var(--color-neutral-800);
-  border-radius:var(--radius-md);box-shadow:var(--shadow-sm);}
-.signin[hidden]{display:none;}
-.signin form{display:flex;flex-direction:column;gap:var(--space-2);}
-.signin input{font:inherit;color:var(--color-text);background:var(--color-bg);border:1px solid var(--color-divider);
-  border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);}
-.pill{font-size:11px;padding:3px 10px;border-radius:6px;background:var(--color-neutral-800);color:var(--color-neutral-400);}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:var(--font-heading);font-weight:500;
-  font-size:14px;color:var(--color-text);background:transparent;border:1px solid transparent;padding:var(--space-2) 13px;border-radius:var(--radius-md);}
-.btn-primary{color:var(--color-accent);border-color:var(--color-accent);}
-.btn-primary:hover{background:color-mix(in srgb,var(--color-accent) 12%,transparent);}
-.btn-secondary{border-color:var(--color-divider);}
-.btn-secondary:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent);}
-.btn-block{width:100%;}
-
-.layout{display:flex;align-items:flex-start;}
-.rail{width:236px;flex:0 0 auto;background:color-mix(in srgb,var(--color-bg) 88%,#000);padding:var(--space-6);
-  display:flex;flex-direction:column;gap:var(--space-6);align-self:stretch;min-height:calc(100vh - 52px);}
-.rail-group{display:flex;flex-direction:column;gap:var(--space-1);}
-.rail-group h6{margin:0 0 var(--space-1);color:var(--color-neutral-600);}
-.rail-item{display:flex;align-items:center;gap:var(--space-3);width:100%;min-height:40px;
-  padding:var(--space-2) var(--space-3) var(--space-2) 19.4px;border:0;border-radius:var(--radius-md);background:none;
-  color:var(--color-neutral-400);font-size:14px;text-align:left;}
-.rail-item:hover{background:color-mix(in srgb,var(--color-surface) 55%,var(--color-bg));color:var(--color-text);}
-.rail-item .count{margin-left:auto;font-size:10px;color:var(--color-accent-600);}
-.rail-item.active{padding-left:var(--space-3);background:var(--color-accent-900);
-  box-shadow:inset 0 0 0 1px var(--color-accent);color:var(--color-accent-300);}
-.rail-item.active .bar{width:3px;height:14px;background:var(--color-accent);border-radius:2px;flex:0 0 auto;}
-.rail-item .bar{display:none;}
-.rail-item.soon{opacity:.62;}
-.rail-item.soon::after{content:"soon";margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--color-neutral-600);
-  border:1px solid var(--color-neutral-800);border-radius:4px;padding:1px 5px;text-transform:uppercase;}
-
-.main{flex:1;min-width:0;padding:var(--space-6) calc(var(--space-8)*1.5) calc(var(--space-8)*2.5);
-  display:flex;flex-direction:column;gap:var(--space-6);}
-
-/* ── search row ────────────────────────────────────────────────────────── */
-.searchrow{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;}
-.input{flex:1 1 220px;min-width:0;min-height:48px;padding:6px 14px;font:inherit;font-size:16px;color:var(--color-text);
-  caret-color:var(--color-accent);background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-md);}
-.input:focus{outline:none;border-color:var(--color-accent);}
-.metaline{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;font-size:11px;color:var(--color-neutral-600);}
-
-/* ── deal cards (1b) ───────────────────────────────────────────────────── */
-.results{display:flex;flex-direction:column;gap:var(--space-3);}
-.card{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);
-  padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);background:var(--color-surface);box-shadow:var(--shadow-sm);}
-.card.top{box-shadow:0 0 0 1px var(--color-accent-800);}
-.card.held{background:color-mix(in srgb,var(--color-surface) 55%,var(--color-bg));border-left:3px solid var(--color-accent);
-  flex-direction:column;align-items:stretch;overflow:hidden;padding:0;}
-.card.held .cardline{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4) var(--space-6);padding:var(--space-4) var(--space-6);}
-.thumb{width:64px;height:64px;border-radius:var(--radius-md);background:color-mix(in srgb,var(--color-surface) 30%,var(--color-bg));
-  flex:0 0 auto;object-fit:cover;}
-.card-body{flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:var(--space-1);}
-.card-head{display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;}
-.title{font-family:var(--font-heading);font-weight:500;font-size:16px;}
-.title.dim{color:var(--color-neutral-400);}
-.reason{font-size:12px;color:var(--color-neutral-500);}
-.signal{flex:0 1 140px;min-width:120px;display:flex;flex-direction:column;gap:var(--space-1);}
-.bar-track{height:4px;border-radius:2px;background:var(--color-accent-900);overflow:hidden;}
-.bar-fill{height:100%;background:var(--color-accent);}
-.bar-fill.hatch{background:repeating-linear-gradient(135deg,var(--color-accent-600) 0 4px,var(--color-accent-900) 4px 8px);}
-.sig-note{font-size:10px;color:var(--color-neutral-600);}
-.sig-note.accent{color:var(--color-accent-400);}
-.priceblock{flex:0 0 auto;margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;}
-.price{font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:600;letter-spacing:-.02em;}
-.price.dim{color:var(--color-neutral-400);}
-.link-sm{font-size:11px;}
-.linkbtn{border:0;background:none;padding:0;color:var(--color-accent);font-size:11px;}
-
-.tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.06em;font-weight:600;padding:3px 10px;border-radius:6px;}
-.tag-deal{background:var(--color-accent-800);color:var(--color-accent-100);}
-.tag-fair{background:var(--color-neutral-800);color:var(--color-neutral-400);}
-.tag-over{background:var(--color-neutral-900);color:var(--color-neutral-500);}
-.tag-susp{border:1px solid var(--color-accent);color:var(--color-accent);}
-
-.why{padding:var(--space-6);background:color-mix(in srgb,var(--color-surface) 22%,var(--color-bg));
-  background-image:linear-gradient(to right,var(--color-divider),var(--color-divider));background-repeat:no-repeat;
-  background-position:top;background-size:100% 1px;display:flex;flex-wrap:wrap;gap:var(--space-6);}
-.why .col{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:var(--space-3);}
-.why .lab{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
-.why .track6{height:6px;border-radius:3px;background:var(--color-neutral-900);overflow:hidden;position:relative;}
-.why .tick{position:absolute;top:-3px;width:1px;height:12px;background:var(--color-text);}
-.why p{flex:1 1 240px;margin:0;font-size:13px;color:var(--color-neutral-500);}
-
-/* ── pipeline (1c) ─────────────────────────────────────────────────────── */
-.stages{display:flex;gap:var(--space-3);align-items:stretch;overflow-x:auto;padding-bottom:var(--space-2);}
-.stage{flex:1 1 0;min-width:150px;padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);
-  background:var(--color-surface);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-1);}
-.stage .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-600);}
-.stage .big{font-family:ui-monospace,Menlo,monospace;font-size:26px;font-weight:600;letter-spacing:-.02em;}
-.stage .d{font-size:11px;color:var(--color-neutral-500);}
-.stage .arrow{align-self:center;color:var(--color-neutral-700);}
-.gridcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-4);}
-.statcard{padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);background:var(--color-surface);
-  box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-2);}
-.statcard .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent);}
-.statcard .num{font-family:ui-monospace,Menlo,monospace;font-size:34px;font-weight:600;letter-spacing:-.03em;}
-.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--space-8);}
-.toprow{display:flex;align-items:baseline;gap:var(--space-3);padding:var(--space-3) 0;
-  background:linear-gradient(to right,var(--color-divider),var(--color-divider)) no-repeat top/100% 1px;}
-.toprow:first-child{background:none;}
-.toprow .rk{width:16px;flex:0 0 auto;font-size:11px;color:var(--color-neutral-600);}
-.toprow .nm{flex:1;min-width:0;font-size:14px;}
-.dist{display:flex;height:14px;border-radius:7px;overflow:hidden;box-shadow:var(--shadow-sm);}
-.dist span{display:block;}
-.legend{display:flex;gap:var(--space-6);flex-wrap:wrap;font-size:12px;color:var(--color-neutral-500);}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
-.section-head{display:flex;flex-direction:column;gap:var(--space-2);max-width:70ch;}
-.loading{color:var(--color-neutral-600);font-size:13px;padding:var(--space-8) 0;}
-.hidden{display:none !important;}
-</style>
-</head>
-<body>
-  <div class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">DealFinder<span>.</span></div>
-      <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">nocturne redesign · wired to live endpoints</span>
-      <span class="pill">free tier</span>
-      <button class="btn btn-secondary" id="acct" type="button">Sign in</button>
-      <div id="signin" class="signin" hidden>
-        <form id="signinEmail">
-          <label class="mono" for="signinAddr">Email me a sign-in link</label>
-          <input id="signinAddr" type="email" required autocomplete="email" placeholder="you@example.com">
-          <button class="btn btn-secondary" type="submit">Send link</button>
-        </form>
-        <button class="btn btn-secondary" type="button" data-provider="google">Continue with Google</button>
-        <button class="btn btn-secondary" type="button" data-provider="github">Continue with GitHub</button>
-        <div id="signinMsg" class="mono" role="status"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="layout">
-    <nav class="rail" id="rail">
-      <div class="rail-group">
-        <h6>Find</h6>
-        <button class="rail-item active" data-mode="deals"><span class="bar"></span>Live deals<span class="count" id="dealsCount"></span></button>
-        <button class="rail-item" data-mode="watchlist"><span class="bar"></span>Watchlist<span class="count" id="wlCount"></span></button>
-        <button class="rail-item" data-mode="semantic"><span class="bar"></span>By meaning</button>
-        <button class="rail-item" data-mode="ask"><span class="bar"></span>Ask the agent</button>
-        <button class="rail-item" data-mode="context"><span class="bar"></span>Context window</button>
-        <button class="rail-item" data-mode="review"><span class="bar"></span>Writer / reviewer</button>
-      </div>
-      <div class="rail-group">
-        <h6>Model</h6>
-        <button class="rail-item" data-mode="dataset"><span class="bar"></span>Dataset</button>
-        <button class="rail-item" data-mode="pipeline"><span class="bar"></span>Pipeline</button>
-        <button class="rail-item" data-mode="models"><span class="bar"></span>Models</button>
-        <button class="rail-item" data-mode="tracking"><span class="bar"></span>Tracking</button>
-        <button class="rail-item" data-mode="evals"><span class="bar"></span>Evals</button>
-        <button class="rail-item" data-mode="mlops"><span class="bar"></span>MLOps loop</button>
-      </div>
-      <div class="rail-group">
-        <h6>Guard</h6>
-        <button class="rail-item" data-mode="safety"><span class="bar"></span>Safety</button>
-        <button class="rail-item" data-mode="compliance"><span class="bar"></span>Compliance</button>
-      </div>
-      <div class="rail-group">
-        <h6>Serve</h6>
-        <button class="rail-item" data-mode="inference"><span class="bar"></span>Inference</button>
-        <button class="rail-item" data-mode="ops"><span class="bar"></span>Cost &amp; drift</button>
-      </div>
-      <div class="rail-group">
-        <h6>Ship</h6>
-        <button class="rail-item" data-mode="auth"><span class="bar"></span>Auth</button>
-        <button class="rail-item" data-mode="billing"><span class="bar"></span>Billing</button>
-        <button class="rail-item" data-mode="suggestions"><span class="bar"></span>Saved searches</button>
-      </div>
-    </nav>
-
-    <main class="main">
-      <div class="searchrow">
-        <input class="input" id="q" value="noise cancelling headphones" placeholder="Search an item…">
-        <button class="btn btn-primary" id="go" style="min-height:48px;padding-inline:20px;">Search</button>
-      </div>
-      <div class="metaline" id="meta"></div>
-
-      <!-- DEALS (1b) -->
-      <section id="view-deals">
-        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
-          <h4>Ranked by value</h4>
-          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">two-signal score · median + model residual</span>
-        </div>
-        <div class="results" id="results"><div class="loading">Loading real offers…</div></div>
-      </section>
-
-      <!-- PIPELINE (1c) -->
-      <section id="view-pipeline" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 style="color:var(--color-accent);">Part 20 · pipelines &amp; orchestration</h6>
-          <h3>A query runs through the system, left to right</h3>
-          <p class="muted">The real five-stage data pipeline, its data-contract gate, and the label distribution it produces — live from <span class="mono">/pipeline</span>.</p>
-        </div>
-        <div class="stages" id="stages"><div class="loading">Loading pipeline…</div></div>
-        <div style="margin-top:var(--space-8);display:flex;flex-direction:column;gap:var(--space-3);">
-          <h5>Label distribution <span class="mono muted" style="font-size:11px;">· 270 rows, two-signal verdict</span></h5>
-          <div class="dist" id="dist"></div>
-          <div class="legend" id="distLegend"></div>
-        </div>
-      </section>
-
-      <!-- EVALS (1c inspector) -->
-      <section id="view-evals" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 style="color:var(--color-accent);">Part 23 · evaluation harness</h6>
-          <h3>The gate that stops a regression merging</h3>
-          <p class="muted">Precision@5 on the hand-labelled golden set, both rankers — live from <span class="mono">/evals</span>.</p>
-        </div>
-        <div class="gridcards" id="evalCards"><div class="loading">Loading evals…</div></div>
-        <div class="two" id="evalTop" style="margin-top:var(--space-8);"></div>
-        <p class="muted" id="evalNote" style="max-width:78ch;margin-top:var(--space-6);font-size:14px;"></p>
-      </section>
-
-      <!-- MODELS (Part 21) -->
-      <section id="view-models" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 style="color:var(--color-accent);">Part 21 · models &amp; deep learning</h6>
-          <h3>Linear vs GBDT+embeddings — the real MAE win</h3>
-          <p class="muted">Fit on the frozen snapshot, live from <span class="mono">/models</span> (needs the full-ML profile).</p>
-        </div>
-        <div class="gridcards" id="modelCards"><div class="loading">Loading models…</div></div>
-        <p class="muted" id="modelNote" style="max-width:78ch;margin-top:var(--space-6);font-size:14px;"></p>
-      </section>
-
-      <!-- TRACKING (Part 22) -->
-      <section id="view-tracking" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 style="color:var(--color-accent);">Part 22 · experiment tracking &amp; registry</h6>
-          <h3>The run ledger and the registered winner</h3>
-          <p class="muted">Five runs on the fair-price feature contract, live from <span class="mono">/tracking</span> (needs the full-ML profile).</p>
-        </div>
-        <div class="gridcards" id="trackCards"><div class="loading">Loading tracking…</div></div>
-        <div id="trackTable" style="margin-top:var(--space-8);"></div>
-      </section>
-
-      <!-- BY MEANING (semantic) -->
-      <section id="view-semantic" class="hidden">
-        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
-          <h4>Nearest by meaning</h4>
-          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">vector similarity · pgvector</span>
-        </div>
-        <div class="results" id="semResults"><div class="loading">Loading…</div></div>
-      </section>
-
-      <!-- ASK (RAG) -->
-      <section id="view-ask" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 style="color:var(--color-accent);">RAG · grounded answers</h6>
-          <h3>Ask the agent</h3>
-          <p class="muted">Retrieve real listings, then generate an answer grounded in them — live from <span class="mono">/ask</span>.</p>
-        </div>
-        <div id="askBody"><div class="loading">Loading…</div></div>
-      </section>
-
-      <!-- WATCHLIST (P1 consumer core) -->
-      <section id="view-watchlist" class="hidden">
-        <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-4);">
-          <h4>Your watchlist</h4>
-          <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">we flag it when the price drops to your target</span>
-        </div>
-        <div class="results" id="wlBody"><div class="loading">Loading…</div></div>
-      </section>
-
-      <!-- GENERIC INSPECTOR (dataset/mlops/safety/inference/ops/auth/billing/compliance/review/context/suggestions) -->
-      <section id="view-generic" class="hidden">
-        <div class="section-head" style="margin-bottom:var(--space-6);">
-          <h6 id="genKicker" style="color:var(--color-accent);"></h6>
-          <h3 id="genTitle"></h3>
-          <p class="muted" id="genSub"></p>
-        </div>
-        <div id="genBody"><div class="loading">Loading…</div></div>
-      </section>
-    </main>
-  </div>
-
-<!-- The package's own UMD file (byte-identical to the npm tarball), pinned by SRI. -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o" crossorigin="anonymous"></script>
-<script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => "$" + Number(n).toFixed(2);
@@ -326,6 +7,14 @@ function safeHref(u){
   try{ const p = new URL(u, location.href); return /^https?:$/.test(p.protocol) ? esc(p.href) : '#'; }
   catch(e){ return '#'; }
 }
+// Behind the deals Worker every backend route sits under /api. Served directly on
+// :8000 it is the bare path. The server writes the base into the page.
+const API = document.querySelector('meta[name="api-base"]').content;
+const LAB = '/lab/';   // the lab's own files, at the same path in both places
+// Off in production until a store key exists. The modes that need live store data say so.
+const LIVE = document.querySelector('meta[name="live-data"]').content === 'on';
+const LIVE_OFF = 'Live store data is off until DealFinder has a Best Buy API key.';
+const NEEDS_LIVE = {deals:'#results', stream:'#streamResults', watchlist:'#wlBody'};
 let state = { mode:"deals", q:"noise cancelling headphones" };
 let rankedThr = 0.70;   // suspicious-residual threshold; the backend sends the real value
 // Real sign-in: Supabase Auth in the browser. The backend verifies the access
@@ -360,7 +49,7 @@ async function toggleAcct(){
 const returnTo = () => location.origin + location.pathname;
 async function initAuth(){
   let cfg = {};
-  try{ cfg = await (await fetch('/config.json')).json(); }catch(e){}
+  try{ cfg = await (await fetch(API + '/config.json')).json(); }catch(e){}
   if(cfg.supabaseUrl && cfg.supabasePublishableKey && window.supabase){
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabasePublishableKey);
     session = (await sb.auth.getSession()).data.session;
@@ -380,10 +69,10 @@ async function initAuth(){
 async function refreshWlCount(){
   const el = document.getElementById('wlCount');
   if(!signedIn()){ if(el) el.textContent=''; return; }
-  try{ const d = await (await fetch('/watchlist', {headers: authHeaders()})).json(); if(el) el.textContent = d.count || ''; }catch(e){}
+  try{ const d = await (await fetch(API + '/watchlist', {headers: authHeaders()})).json(); if(el) el.textContent = d.count || ''; }catch(e){}
 }
 const loaded = {};
-const BESPOKE = ['deals','pipeline','evals','models','tracking','semantic','ask','watchlist'];
+const BESPOKE = ['deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist'];
 const GENERIC = {
   context:{ep:'/context',q:true,kicker:'Part 16 · context engineering',title:'The window as a token budget',sub:'What fits and what gets evicted — live from /context.'},
   review:{ep:'/review',q:true,kicker:'Part 17 · writer / reviewer',title:'Draft, critique, revise',sub:'A second-opinion agent gates the answer — live from /review.'},
@@ -404,10 +93,22 @@ document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{
 });
 function setMode(m){
   state.mode = m;
-  document.querySelectorAll('.rail-item[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  // The ready flag marks a finished render (Plan 6's screenshots wait on it). A switch clears it.
+  document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{ b.classList.toggle('active',b.dataset.mode===m); delete b.dataset.ready; });
   const view = BESPOKE.includes(m) ? m : 'generic';
-  ['deals','pipeline','evals','models','tracking','semantic','ask','watchlist','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
-  ({deals:loadDeals,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)))();
+  ['deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
+  $('#trapRow').hidden = m !== 'review';
+  if(m !== 'stream' && stream){ stream.close(); stream = null; loaded.stream = false; }
+  const load = (!LIVE && NEEDS_LIVE[m]) ? (()=>liveOff(m)) :
+    ({deals:loadDeals,stream:loadStream,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)));
+  Promise.resolve(load()).finally(()=>{
+    const b = document.querySelector(`.rail-item[data-mode="${m}"]`);
+    if(b && state.mode === m) b.dataset.ready = 'true';
+  });
+}
+function liveOff(m){
+  $(NEEDS_LIVE[m]).innerHTML = `<div class="loading">${LIVE_OFF} <a class="link-sm" href="/">Check a deal instead →</a></div>`;
+  $('#meta').innerHTML = '';
 }
 
 const mlHint = ep => `<div class="statcard"><div class="k" style="color:var(--color-neutral-500);">unavailable</div><div class="muted" style="font-size:13px;">This mode needs the full-ML profile. Start it with<br><span class="mono" style="font-size:11px;">docker compose -f docker-compose.yml -f docker-compose.full.yml up</span><br>then reopen this mode.</div></div>`;
@@ -415,7 +116,7 @@ const mlHint = ep => `<div class="statcard"><div class="k" style="color:var(--co
 async function loadModels(){
   if(loaded.models) return; loaded.models=true;
   try{
-    const r = await fetch('/models'); if(!r.ok) throw new Error('needs full-ML profile');
+    const r = await fetch(API + '/models'); if(!r.ok) throw new Error('needs full-ML profile');
     const d = await r.json(); const f=d.full, t=d.torch_mlp;
     const stat=(k,num,meta,accent)=>`<div class="statcard"><div class="k">${k}</div><div class="num"${accent?' style="color:var(--color-accent-400);"':''}>${num}</div><div class="muted" style="font-size:11px;">${meta}</div></div>`;
     $('#modelCards').innerHTML =
@@ -430,7 +131,7 @@ async function loadModels(){
 async function loadTracking(){
   if(loaded.tracking) return; loaded.tracking=true;
   try{
-    const r = await fetch('/tracking'); if(!r.ok) throw new Error('needs full-ML profile');
+    const r = await fetch(API + '/tracking'); if(!r.ok) throw new Error('needs full-ML profile');
     const d = await r.json();
     if(!d.mlflow_available){ $('#trackCards').innerHTML=mlHint('/tracking'); $('#trackTable').innerHTML=''; loaded.tracking=false; return; }
     $('#trackCards').innerHTML =
@@ -450,7 +151,7 @@ async function loadDeals(){
   if(loaded.deals) return; loaded.deals=true;
   $('#results').innerHTML='<div class="loading">Loading real offers…</div>';
   try{
-    const d = await (await fetch(`/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
+    const d = await (await fetch(API + `/ranked?q=${encodeURIComponent(state.q)}&k=8`)).json();
     rankedThr = d.residual_threshold ?? rankedThr;
     $('#dealsCount').textContent = d.count;
     $('#meta').innerHTML = `<span class="mono">${d.count} offers · ${d.median_price==null ? 'ratings off' : 'median '+money(d.median_price)} · two-signal ranked</span>`;
@@ -539,7 +240,7 @@ async function addWatch(r, btn){
   try{
     // Only which offer and a target: the server fills in the title and price from its catalog.
     const body = {offer_id:r.id, target_price:r.price};
-    const res = await fetch('/watchlist', {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(body)});
+    const res = await fetch(API + '/watchlist', {method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify(body)});
     if(res.ok && btn){ btn.textContent='watching ✓'; btn.disabled=true; btn.style.color='var(--color-neutral-500)'; }
     else if(btn){ btn.textContent = res.status === 404 ? 'search again to watch' : 'could not watch'; }
     refreshWlCount();
@@ -553,11 +254,45 @@ function wireWhy(){
   }));
 }
 
+/* ── STREAM (Part 18 · server-sent events) ───────────────────────────── */
+let stream = null;   // the open EventSource, closed by a new search or a mode switch
+function loadStream(){
+  if(loaded.stream) return; loaded.stream=true;
+  const box = $('#streamResults'); box.innerHTML = '';
+  if(stream) stream.close();
+  let n = 0; const srcs = [];
+  return new Promise(resolve => {
+    const es = stream = new EventSource(API + `/search/stream?q=${encodeURIComponent(state.q)}`);
+    es.addEventListener('results', e => {
+      const d = JSON.parse(e.data);
+      if(d.source && !srcs.includes(d.source)) srcs.push(d.source);
+      (d.results||[]).forEach(r => { box.insertAdjacentHTML('beforeend', semCard(r)); n++; });
+      $('#meta').innerHTML = `<span class="mono">streaming… ${n} offers · sources: ${esc(srcs.join(', '))}</span>`;
+    });
+    es.addEventListener('source_error', e => {
+      const d = JSON.parse(e.data); if(d.source && !srcs.includes(d.source)) srcs.push(d.source + ' ✗');
+    });
+    es.addEventListener('done', e => {
+      const d = JSON.parse(e.data);
+      $('#meta').innerHTML = `<span class="mono">${n} offers streamed · sources: ${esc(srcs.join(', ') || 'none')} · ${d.median_price==null ? 'ratings off' : 'median '+money(d.median_price)}</span>`;
+      if(!n) box.innerHTML = '<div class="loading">No results.</div>';
+      es.close(); resolve();
+    });
+    // EventSource reports 'error' when the stream drops. Closing stops the browser's
+    // automatic reconnect, which would run the search again.
+    es.addEventListener('error', () => {
+      es.close(); loaded.stream = false;
+      if(!n) box.innerHTML = '<div class="loading">Could not reach /search/stream.</div>';
+      resolve();
+    });
+  });
+}
+
 /* ── PIPELINE (1c) ───────────────────────────────────────────────────── */
 async function loadPipeline(){
   if(loaded.pipeline) return; loaded.pipeline=true;
   try{
-    const d = await (await fetch('/pipeline?q='+encodeURIComponent(state.q))).json();
+    const d = await (await fetch(API + '/pipeline?q='+encodeURIComponent(state.q))).json();
     const nums = { ingest:d.contract.total, normalize:d.contract.total, 'quality-gate':`${d.contract.valid}/${d.contract.total}`,
                    label:d.contract.total, 'good_deals model':d.good_deals };
     $('#stages').innerHTML = d.stages.map((s,i)=>`
@@ -579,7 +314,7 @@ async function loadPipeline(){
 async function loadEvals(){
   if(loaded.evals) return; loaded.evals=true;
   try{
-    const d = await (await fetch('/evals')).json();
+    const d = await (await fetch(API + '/evals')).json();
     $('#evalCards').innerHTML = `
       <div class="statcard"><div class="k">two_signal</div>
         <div style="display:flex;align-items:baseline;gap:var(--space-3);"><span class="num" style="color:var(--color-accent-400);">${d.two_signal.precision_at_5.toFixed(2)}</span><span class="tag tag-deal">gate pass</span></div>
@@ -602,7 +337,7 @@ async function loadSemantic(){
   if(loaded.semantic) return; loaded.semantic=true;
   $('#semResults').innerHTML='<div class="loading">Loading…</div>';
   try{
-    const d=await (await fetch(`/semantic?q=${encodeURIComponent(state.q)}&k=8`)).json();
+    const d=await (await fetch(API + `/semantic?q=${encodeURIComponent(state.q)}&k=8`)).json();
     $('#semResults').innerHTML = d.results.map(semCard).join('') || '<div class="loading">No matches.</div>';
   }catch(e){ $('#semResults').innerHTML=`<div class="loading">Could not reach /semantic — ${esc(e.message)}</div>`; loaded.semantic=false; }
 }
@@ -622,12 +357,14 @@ async function loadAsk(){
   if(loaded.ask) return; loaded.ask=true;
   $('#askBody').innerHTML='<div class="loading">Loading…</div>';
   try{
-    const d=await (await fetch(`/ask?q=${encodeURIComponent(state.q)}`)).json();
+    const ep = $('#agentic').checked ? '/ask_agentic' : '/ask';
+    const d=await (await fetch(API + ep + `?q=${encodeURIComponent(state.q)}`)).json();
     const badge = d.grounded?'<span class="tag tag-deal">grounded ✓</span>':'<span class="tag tag-susp">ungrounded</span>';
     $('#askBody').innerHTML = `
       <div class="card" style="flex-direction:column;align-items:stretch;gap:var(--space-3);">
         <div style="display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;">${badge}<span class="tag tag-fair">${d.used_llm?'LLM':'deterministic'}</span><span class="mono" style="font-size:11px;color:var(--color-neutral-600);margin-left:auto;">${d.sources.length} sources</span></div>
         <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;">${esc(d.answer)}</div>
+        ${d.hops ? `<ol class="mono" style="font-size:11px;color:var(--color-neutral-500);margin:0;padding-left:var(--space-6);">${d.hops.map(h=>`<li>${esc(h.query)} · ${h.sufficient?'enough evidence':'too thin'} · ${esc(h.reason)}</li>`).join('')}</ol>` : ''}
         <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);">${d.sources.map(s=>`<span class="mono" style="font-size:10px;color:var(--color-neutral-600);border:1px solid var(--color-neutral-800);border-radius:5px;padding:2px 7px;">${esc(s)}</span>`).join('')}</div>
       </div>`;
   }catch(e){ $('#askBody').innerHTML=`<div class="loading">Could not reach /ask — ${esc(e.message)}</div>`; loaded.ask=false; }
@@ -636,12 +373,16 @@ async function loadAsk(){
 /* ── GENERIC INSPECTOR ───────────────────────────────────────────────── */
 async function loadGeneric(m){
   const cfg=GENERIC[m]; if(!cfg) return;
-  $('#genKicker').textContent=cfg.kicker; $('#genTitle').textContent=cfg.title; $('#genSub').textContent=cfg.sub;
+  const lesson = LESSONS[m];
+  if(lesson && lesson.live && lesson.slug) $('#genKicker').innerHTML = kickerLink(cfg.kicker, lesson.slug);
+  else $('#genKicker').textContent = cfg.kicker;
+  $('#genTitle').textContent=cfg.title; $('#genSub').textContent=cfg.sub;
   if(loaded[m]) return; loaded[m]=true;
   $('#genBody').innerHTML='<div class="loading">Loading…</div>';
   try{
-    const url = cfg.ep + (cfg.q?`?q=${encodeURIComponent(state.q)}`:'');
-    const r=await fetch(url); if(!r.ok) throw new Error('unavailable');
+    const url = cfg.ep + (cfg.q?`?q=${encodeURIComponent(state.q)}`:'') +
+      (m==='review' ? '&trap=' + ($('#trap').checked ? 'true' : 'false') : '');
+    const r=await fetch(API + url); if(!r.ok) throw new Error('unavailable');
     $('#genBody').innerHTML = renderInspector(await r.json());
   }catch(e){ $('#genBody').innerHTML=mlHint(cfg.ep); loaded[m]=false; }
 }
@@ -692,12 +433,12 @@ async function loadWatchlist(){
   if(loaded.watchlist) return; loaded.watchlist = true;
   body.innerHTML = '<div class="loading">Loading…</div>';
   try{
-    const d = await (await fetch('/watchlist', {headers: authHeaders()})).json();
+    const d = await (await fetch(API + '/watchlist', {headers: authHeaders()})).json();
     $('#wlCount').textContent = d.count || '';
     if(!d.items.length){ body.innerHTML = '<div class="loading">Nothing watched yet — add items from Live deals with “＋ watch”.</div>'; return; }
     body.innerHTML = d.items.map(wlCard).join('');
     document.querySelectorAll('.wl-remove').forEach(b=>b.onclick=async()=>{
-      await fetch('/watchlist/' + encodeURIComponent(b.dataset.id), {method:'DELETE', headers: authHeaders()});
+      await fetch(API + '/watchlist/' + encodeURIComponent(b.dataset.id), {method:'DELETE', headers: authHeaders()});
       loaded.watchlist = false; loadWatchlist();
     });
   }catch(e){ body.innerHTML = `<div class="loading">Could not load watchlist — ${esc(e.message)}</div>`; loaded.watchlist = false; }
@@ -721,9 +462,32 @@ function wlCard(it){
   </div>`;
 }
 
-document.getElementById('acct').addEventListener('click', toggleAcct);
-initAuth();
-loadDeals();
-</script>
-</body>
-</html>
+/* ── lessons, sources, start-up ──────────────────────────────────────── */
+// Each mode's "Part N" kicker links to its lesson once that lesson is published.
+let LESSONS = {};
+const kickerLink = (text, slug) => `<a href="${safeHref('https://cloudcodetree.com/tutorials/' + slug + '/')}">${esc(text)}</a>`;
+async function loadLessons(){
+  try{ LESSONS = await (await fetch(LAB + 'lessons.json')).json(); }catch(e){ return; }
+  for(const [m, v] of Object.entries(LESSONS)){
+    const h = document.querySelector(`#view-${m} .section-head h6`);
+    if(h && v.live && v.slug) h.innerHTML = kickerLink(h.textContent, v.slug);
+  }
+}
+async function loadSources(){
+  try{
+    const s = await (await fetch(API + '/sources')).json();
+    const on = Object.entries(s).filter(([,v])=>v).map(([k])=>k);
+    $('#sourcesLine').innerHTML = `<span class="mono">free-tier sources on: ${esc(on.join(', ') || 'none')} · metered sources (Amazon, Apify, Firecrawl) stay off unless DEALFINDER_ENABLE_PAID_SOURCES=1</span>`;
+  }catch(e){}
+}
+$('#agentic').addEventListener('change', ()=>{ loaded.ask = false; if(state.mode==='ask') setMode('ask'); });
+$('#trap').addEventListener('change', ()=>{ loaded.review = false; if(state.mode==='review') setMode('review'); });
+if(LIVE){ document.getElementById('acct').addEventListener('click', toggleAcct); initAuth(); }
+else document.getElementById('acct').hidden = true;   // nothing to sign in for without live data
+loadLessons(); loadSources();
+// Deep links (Plan 6's screenshot manifests): ?mode=<id>&q=<query> opens that mode and runs it.
+const params = new URLSearchParams(location.search);
+const startQ = (params.get('q') || '').trim();
+if(startQ){ state.q = startQ; $('#q').value = startQ; }
+const startMode = params.get('mode');
+setMode(document.querySelector(`.rail-item[data-mode="${CSS.escape(startMode || '')}"]`) ? startMode : 'deals');
