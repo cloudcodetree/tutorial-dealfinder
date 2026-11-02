@@ -6,6 +6,7 @@ from dealfinder.schema import Product
 from dealfinder.sources import DealSource
 
 
+# ANCHOR: dedup
 def dedup_key(p: Product) -> str:
     """Exact-match collision key: same brand + title (case-insensitive).
 
@@ -27,3 +28,4 @@ def ingest(sources: list[DealSource]) -> list[Product]:
             if k not in best or p.price < best[k].price:
                 best[k] = p
     return list(best.values())
+# ANCHOR_END: dedup

@@ -323,6 +323,32 @@ def lab_asset(name: str) -> Response:
     return Response((_LAB / name).read_bytes(), media_type=LAB_ASSETS[name])
 
 
+# The retailer tokens Part 1's brand audit looks for (tests/test_part01.py pins the count).
+_RETAILER_TOKENS = ("Walmart", "Target", "Costco", "Macy", "Best Buy", "Amazon", "mountainlifestyle", "kohl")
+
+
+@app.get("/snapshot")
+def snapshot_audit(q: str = "", limit: Annotated[int, Query(ge=1, le=500)] = 50):
+    """Part 1's frozen snapshot, with the brand audit made visible: each row's raw
+    `brand` field beside the brand extracted from its title. `retailer_polluted`
+    counts rows whose raw brand is a retailer. `q` filters titles, case-insensitive."""
+    from .features import title_brand
+    from .snapshot import load_snapshot, to_products
+
+    items = load_snapshot()
+    polluted = sum(1 for x in items if any(t.lower() in (x.get("brand") or "").lower() for t in _RETAILER_TOKENS))
+    needle = q.strip().lower()
+    rows = []
+    for item, p in zip(items, to_products(items)):
+        if needle and needle not in p.title.lower():
+            continue
+        rows.append({"id": p.id, "title": p.title, "raw_brand": item.get("brand"), "brand": title_brand(p.title),
+                     "price": p.price, "source": p.source, "dedup_key": dedup_key(p)})
+        if len(rows) >= limit:
+            break
+    return {"total": len(items), "retailer_polluted": polluted, "count": len(rows), "rows": rows}
+
+
 @app.get("/redesign")
 def redesign() -> RedirectResponse:
     """The old Nocturne page lives on as the lab."""

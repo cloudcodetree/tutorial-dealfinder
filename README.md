@@ -136,6 +136,8 @@ docker compose down                     # stop  (add -v to also delete the pgvec
 
 ## Steps (and what each adds)
 
+**Course checkpoints:** every lesson is a step you can check out, diff and test with `make check STEP=NN`. See [`course/README.md`](course/README.md).
+
 | Step | What you add |
 |---|---|
 | `step-01` | Package scaffold + tooling + devcontainer |

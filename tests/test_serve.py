@@ -799,3 +799,23 @@ def test_a_trap_review_still_runs_past_the_cap(monkeypatch, fresh_ask):
     _llm_world(monkeypatch, cap=0)
     body = client.get("/review", params={"q": "noise cancelling headphones", "trap": "true"}).json()
     assert body["revised"] is True
+
+# ── Plan 6 Task 8: the Part 1 snapshot, as a lab mode ───────────────────────
+def test_snapshot_route_counts():
+    j = client.get("/snapshot").json()
+    assert (j["total"], j["retailer_polluted"]) == (270, 154) and all("image_url" not in r for r in j["rows"])
+    assert set(j["rows"][0]) == {"id", "title", "raw_brand", "brand", "price", "source", "dedup_key"}
+
+
+def test_snapshot_route_filters_case_insensitively():
+    rows = client.get("/snapshot", params={"q": "SONY", "limit": 500}).json()["rows"]
+    assert rows and all("sony" in r["title"].lower() for r in rows)
+
+
+def test_snapshot_route_caps_its_page():
+    assert client.get("/snapshot", params={"limit": 10}).json()["count"] == 10
+    assert client.get("/snapshot", params={"limit": 100_000}).status_code == 422
+
+
+def test_lab_registers_snapshot_mode():
+    assert 'data-mode="snapshot"' in client.get("/lab").text

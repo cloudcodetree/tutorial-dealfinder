@@ -90,6 +90,7 @@ BRAND_TIER: dict[str, int] = {
 DEFAULT_BRAND_TIER = 1
 
 
+# ANCHOR: title-brand
 def title_brand(title: str) -> str | None:
     """Extract the true manufacturer from a listing title, or None if unknown.
 
@@ -108,6 +109,7 @@ def title_brand(title: str) -> str | None:
     if first and first[0].isalpha() and first[:1].isupper() and len(first) > 1:
         return first
     return None
+# ANCHOR_END: title-brand
 
 
 def brand_tier(title: str) -> int:

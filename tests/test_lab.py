@@ -10,7 +10,7 @@ from dealfinder.serve import app
 client = TestClient(app)
 
 STATIC = Path(serve.__file__).parent / "static"
-LAB_MODES = {"deals", "stream", "watchlist", "semantic", "ask", "context", "review", "dataset",
+LAB_MODES = {"snapshot", "deals", "stream", "watchlist", "semantic", "ask", "context", "review", "dataset",
              "pipeline", "models", "tracking", "evals", "mlops", "safety", "compliance",
              "inference", "ops", "auth", "billing", "suggestions"}
 COURSE_ENDPOINTS = ["/ranked", "/search/stream", "/watchlist", "/semantic", "/ask_agentic", "/context",
@@ -58,6 +58,16 @@ def test_lab_supports_deep_links_and_a_ready_flag():
     js = _js()
     assert "URLSearchParams(location.search)" in js
     assert re.search(r"dataset\.ready\s*=\s*['\"]true['\"]", js)
+
+
+def test_lab_sets_the_ready_flag_only_after_a_good_render():
+    # Plan 6's screenshots wait on the flag. A loader that could only draw its error
+    # screen returns false, so a failed /snapshot never becomes a lesson screenshot.
+    js = (STATIC / "lab" / "lab.js").read_text()
+    assert re.search(r"\.catch\(\(\)\s*=>\s*false\)\.then\(ok\s*=>", js)
+    assert re.search(r"ok\s*!==\s*false\s*&&", js)
+    snapshot = js[js.index("async function loadSnapshot"):js.index("/* ── STREAM")]
+    assert re.search(r"catch\(e\)\{[^\n]*return false;\s*\}", snapshot)
 
 
 def test_lab_assets_are_allowlisted():
