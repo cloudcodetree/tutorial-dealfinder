@@ -72,7 +72,7 @@ async function refreshWlCount(){
   try{ const d = await (await fetch(API + '/watchlist', {headers: authHeaders()})).json(); if(el) el.textContent = d.count || ''; }catch(e){}
 }
 const loaded = {};
-const BESPOKE = ['deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist'];
+const BESPOKE = ['snapshot','deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist'];
 const GENERIC = {
   context:{ep:'/context',q:true,kicker:'Part 16 · context engineering',title:'The window as a token budget',sub:'What fits and what gets evicted — live from /context.'},
   review:{ep:'/review',q:true,kicker:'Part 17 · writer / reviewer',title:'Draft, critique, revise',sub:'A second-opinion agent gates the answer — live from /review.'},
@@ -96,11 +96,11 @@ function setMode(m){
   // The ready flag marks a finished render (Plan 6's screenshots wait on it). A switch clears it.
   document.querySelectorAll('.rail-item[data-mode]').forEach(b=>{ b.classList.toggle('active',b.dataset.mode===m); delete b.dataset.ready; });
   const view = BESPOKE.includes(m) ? m : 'generic';
-  ['deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
+  ['snapshot','deals','stream','pipeline','evals','models','tracking','semantic','ask','watchlist','generic'].forEach(v=>$('#view-'+v).classList.toggle('hidden',v!==view));
   $('#trapRow').hidden = m !== 'review';
   if(m !== 'stream' && stream){ stream.close(); stream = null; loaded.stream = false; }
   const load = (!LIVE && NEEDS_LIVE[m]) ? (()=>liveOff(m)) :
-    ({deals:loadDeals,stream:loadStream,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)));
+    ({snapshot:loadSnapshot,deals:loadDeals,stream:loadStream,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)));
   Promise.resolve(load()).finally(()=>{
     const b = document.querySelector(`.rail-item[data-mode="${m}"]`);
     if(b && state.mode === m) b.dataset.ready = 'true';
@@ -252,6 +252,27 @@ function wireWhy(){
     const el=$('#why-'+b.dataset.i); const open=!el.classList.contains('hidden');
     el.classList.toggle('hidden'); b.textContent = open?'why held? →':'hide ↑';
   }));
+}
+
+/* ── SNAPSHOT (Part 1 · the data layer) ──────────────────────────────── */
+async function loadSnapshot(){
+  if(loaded.snapshot) return; loaded.snapshot=true;
+  const body = $('#snapBody');
+  try{
+    const d = await (await fetch(API + `/snapshot?q=${encodeURIComponent(state.q)}&limit=50`)).json();
+    $('#snapMeta').innerHTML = `<span class="mono">${d.count} of ${d.total} rows shown · ${d.retailer_polluted} of ${d.total} carry a retailer in their brand field</span>`;
+    if(!d.rows.length){ body.innerHTML = `<div class="loading">No snapshot title contains “${esc(state.q)}”.</div>`; return; }
+    const differs = r => (r.raw_brand||'').toLowerCase() !== (r.brand||'').toLowerCase();
+    body.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <tr>${['title','raw brand','brand from title','price','source'].map(c=>`<th style="text-align:left;padding:var(--space-2);color:var(--color-neutral-500);font-weight:500;border-bottom:1px solid var(--color-divider);">${c}</th>`).join('')}</tr>
+      ${d.rows.map(r=>`<tr${differs(r)?' data-row-polluted="true"':''}>
+        <td style="padding:var(--space-2);">${esc(r.title)}</td>
+        <td class="raw-brand mono" style="padding:var(--space-2);${differs(r)?'color:var(--warn);':''}">${esc(r.raw_brand||'—')}</td>
+        <td class="mono" style="padding:var(--space-2);">${esc(r.brand||'—')}</td>
+        <td class="mono" style="padding:var(--space-2);">${money(r.price)}</td>
+        <td class="mono" style="padding:var(--space-2);color:var(--color-neutral-500);">${esc(r.source||'')}</td></tr>`).join('')}
+    </table></div>`;
+  }catch(e){ body.innerHTML=`<div class="loading">Could not reach /snapshot — ${esc(e.message)}</div>`; loaded.snapshot=false; }
 }
 
 /* ── STREAM (Part 18 · server-sent events) ───────────────────────────── */

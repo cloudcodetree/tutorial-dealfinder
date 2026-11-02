@@ -45,6 +45,7 @@
       </div>
       <div class="rail-group">
         <h6>Model</h6>
+        <button class="rail-item" data-mode="snapshot"><span class="bar"></span>Snapshot (Part 1)</button>
         <button class="rail-item" data-mode="dataset"><span class="bar"></span>Dataset</button>
         <button class="rail-item" data-mode="pipeline"><span class="bar"></span>Pipeline</button>
         <button class="rail-item" data-mode="models"><span class="bar"></span>Models</button>
@@ -94,6 +95,17 @@
           <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">server-sent events · /search/stream</span>
         </div>
         <div class="results" id="streamResults"><div class="loading">Loading…</div></div>
+      </section>
+
+      <!-- SNAPSHOT (Part 1 · the data layer) -->
+      <section id="view-snapshot" class="hidden">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 1 · data layer &amp; the snapshot</h6>
+          <h3>The raw brand field against the brand in the title</h3>
+          <p class="muted">The frozen snapshot, filtered by the search box — live from <span class="mono">/snapshot</span>. A highlighted row is one whose <span class="mono">brand</span> field disagrees with its title.</p>
+        </div>
+        <div class="metaline" id="snapMeta"></div>
+        <div id="snapBody"><div class="loading">Loading…</div></div>
       </section>
 
       <!-- PIPELINE (1c) -->

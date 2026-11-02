@@ -1,0 +1,19 @@
+id = "01"
+lesson = "dealfinder-part-01"
+title = "Data layer, normalization & the snapshot"
+tests = ["tests/test_part01.py", "tests/test_schema.py", "tests/test_snapshot.py", "tests/test_ingest.py"]
+
+[[capture]]
+name = "pytest"
+cmd = "python -m pytest tests/test_part01.py -v -p no:cacheprovider"
+# pytest's header names the machine's Python, OS and plugin versions, which differ between a
+# laptop and CI. The lesson quotes the tests, not the header.
+normalize = [{pattern = '(?m)^platform .*$', replace = 'platform <python, os>'},
+             {pattern = '(?m)^plugins: .*$', replace = 'plugins: <installed plugins>'}]
+
+[[shot]]
+name = "snapshot-brand-audit"
+route = "/lab?mode=snapshot&q=sony"
+ready = "[data-mode='snapshot'][data-ready='true']"
+highlight = ["[data-row-polluted='true'] .raw-brand"]
+viewport = { width = 1280, height = 860 }

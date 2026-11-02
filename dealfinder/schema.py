@@ -12,6 +12,7 @@ class PricePoint(BaseModel):
     price: float
 
 
+# ANCHOR: product
 class Product(BaseModel):
     id: str
     title: str
@@ -32,3 +33,4 @@ class Product(BaseModel):
     condition: str = "new"  # new / refurb / used (parsed from the title in features.py)
     specs: dict[str, str] = {}
     price_history: list[PricePoint] = []
+# ANCHOR_END: product

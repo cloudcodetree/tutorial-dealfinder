@@ -39,6 +39,7 @@ def _newest_snapshot() -> Path:
     return Path(matches[-1])
 
 
+# ANCHOR: load-snapshot
 def load_snapshot(path: str | None = None) -> list[dict]:
     """Return the snapshot's raw item rows (list of dicts), newest file by default.
 
@@ -50,6 +51,7 @@ def load_snapshot(path: str | None = None) -> list[dict]:
     # The snapshot is ``{"meta": {...}, "items": [...]}``; tolerate a bare list too.
     items = data["items"] if isinstance(data, dict) else data
     return [{k: v for k, v in r.items() if k != "image_url"} for r in items]
+# ANCHOR_END: load-snapshot
 
 
 def load_snapshot_meta(path: str | None = None) -> dict:

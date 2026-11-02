@@ -70,6 +70,7 @@ class ItunesSource:
         return out
 
 
+# ANCHOR: rapidapi-source
 class RapidApiSource:
     name = "RapidAPI"
     tier = 1  # fast, generous limits — try first
@@ -100,6 +101,7 @@ class RapidApiSource:
                 image_url=(it.get("product_photos") or [None])[0],
             ))
         return out
+# ANCHOR_END: rapidapi-source
 
 
 class ApifySource:

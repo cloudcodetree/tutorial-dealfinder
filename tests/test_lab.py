@@ -10,7 +10,7 @@ from dealfinder.serve import app
 client = TestClient(app)
 
 STATIC = Path(serve.__file__).parent / "static"
-LAB_MODES = {"deals", "stream", "watchlist", "semantic", "ask", "context", "review", "dataset",
+LAB_MODES = {"snapshot", "deals", "stream", "watchlist", "semantic", "ask", "context", "review", "dataset",
              "pipeline", "models", "tracking", "evals", "mlops", "safety", "compliance",
              "inference", "ops", "auth", "billing", "suggestions"}
 COURSE_ENDPOINTS = ["/ranked", "/search/stream", "/watchlist", "/semantic", "/ask_agentic", "/context",
