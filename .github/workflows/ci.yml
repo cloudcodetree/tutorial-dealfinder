@@ -67,6 +67,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+      # A second build with a test DSN: proves error reports leave without query text.
+      - run: npx playwright test -c playwright.sentry.config.ts
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -105,6 +107,9 @@ jobs:
           node-version: "22"
       - run: npm ci && npm run build
         working-directory: frontend
+        env:
+          # Public by design (a DSN only accepts error reports). Empty means no Sentry.
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
       - run: npm ci
         working-directory: edge
       - uses: google-github-actions/auth@v2

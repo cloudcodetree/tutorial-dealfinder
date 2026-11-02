@@ -104,5 +104,12 @@ def test_frontend_job_runs_the_browser_suite_and_keeps_the_report():
     assert str(node["with"]["node-version"]) == "22"
     runs = [s.get("run", "") for s in steps]
     assert "npm ci" in runs and "npx playwright install --with-deps chromium" in runs and "npx playwright test" in runs
+    assert "npx playwright test -c playwright.sentry.config.ts" in runs   # the DSN build, scrubbing proven
     upload = steps[_index(steps, "actions/upload-artifact")]
     assert upload["if"] == "failure()" and upload["with"]["path"] == "frontend/playwright-report"
+
+
+def test_the_deploy_build_takes_the_public_sentry_dsn_from_a_repo_variable():
+    steps = _deploy_steps()
+    build = steps[_index(steps, "npm ci && npm run build")]
+    assert build["env"] == {"VITE_SENTRY_DSN": "${{ vars.VITE_SENTRY_DSN }}"}

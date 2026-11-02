@@ -16,6 +16,8 @@ import re
 
 import httpx
 
+from . import observability
+
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 _SKIP = {402, 403, 404, 429, 502, 503}  # unavailable/throttled → try next model
 
@@ -53,7 +55,9 @@ def chat(messages: list[dict], temperature: float = 0, json_mode: bool = False,
             last = f"{model}: {e}"
             continue
         if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"]
+            body = r.json()
+            observability.add_llm_usage("openrouter", model, body.get("usage"))
+            return body["choices"][0]["message"]["content"]
         last = f"{model}: HTTP {r.status_code}"
         if r.status_code in _SKIP:
             continue          # throttled / unavailable → next tier

@@ -25,7 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, licensing, live_sources, migrate, pgstore, ratelimit, shop
+from . import db, licensing, live_sources, migrate, observability, pgstore, ratelimit, shop
 from .aggregate import aggregate
 from .auth import User, require_user
 from .deal import deal_score
@@ -37,6 +37,8 @@ from .rag import _category_models, _load_medians
 from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
 
+# Sentry starts before the app exists, so its FastAPI integration wraps it.
+observability.init_sentry()
 app = FastAPI(title="DealFinder")
 
 # Per-instance limits for the anonymous routes (ratelimit.LIMITS). Module-level so
@@ -70,6 +72,10 @@ async def edge_guard(request: Request, call_next):
         if not hmac.compare_digest(got.encode(), secret.encode()):
             return JSONResponse({"detail": "direct access not allowed"}, status_code=403)
     return await call_next(request)
+
+
+# Outermost of all: every request, refused or served, gets one log line and its cost.
+app.add_middleware(observability.RequestLogMiddleware)
 
 
 def _json_safe(value):
@@ -465,6 +471,7 @@ def _stream_search(query: str, sources):
         try:
             if not src.available():
                 continue
+            observability.add_source_call(src.name)
             found = src.search(query) or []
         except Exception:
             # a flaky/rate-limited source never breaks the stream
