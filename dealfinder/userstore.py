@@ -11,7 +11,21 @@ transaction, so a client cannot set the price it is alerted on.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+
 from . import db, licensing
+
+# One JSON line per account deletion, on stdout, with a hashed user id.
+_account_log = logging.getLogger("dealfinder.account")
+_account_log.setLevel(logging.INFO)
+if not _account_log.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    _account_log.addHandler(_handler)
 
 WATCH_LIMIT = 200
 SAVED_SEARCH_LIMIT = 50
@@ -117,3 +131,33 @@ def remove_saved_search(user_id: str, search_id: str, url: str | None = None) ->
     with db.scoped(user_id=user_id, url=url) as cur:
         cur.execute("DELETE FROM dealfinder.saved_searches WHERE id = %s::uuid", (search_id,))
         return cur.rowcount
+
+
+def export_user(user_id: str, url: str | None = None) -> dict:
+    """Everything DealFinder holds for the user, from the real tables, in one transaction.
+
+    At launch that is the watchlist and the saved searches. Profiles and alert history
+    join when alerts ship. The shared sign-in account is Supabase's, not ours."""
+    with db.scoped(user_id=user_id, url=url) as cur:
+        watch = cur.execute(
+            f"SELECT {_WATCH_COLS} FROM dealfinder.watchlist WHERE user_id = %s ORDER BY created_at DESC",
+            (user_id,)).fetchall()
+        saved = cur.execute(
+            """SELECT id, query, max_price, created_at FROM dealfinder.saved_searches
+               WHERE user_id = %s ORDER BY created_at DESC""", (user_id,)).fetchall()
+    return {"exported_at": datetime.now(timezone.utc).isoformat(), "watchlist": watch, "saved_searches": saved}
+
+
+def delete_user(user_id: str, url: str | None = None) -> dict[str, int]:
+    """Delete the user's DealFinder rows and return per-table counts. Row-level security
+    and the explicit user_id match both keep it to this user. It never touches
+    auth.users: the sign-in account is shared with cloudcodetree.com."""
+    with db.scoped(user_id=user_id, url=url) as cur:
+        cur.execute("DELETE FROM dealfinder.watchlist WHERE user_id = %s", (user_id,))
+        watch = cur.rowcount
+        cur.execute("DELETE FROM dealfinder.saved_searches WHERE user_id = %s", (user_id,))
+        saved = cur.rowcount
+    counts = {"watchlist": watch, "saved_searches": saved}
+    _account_log.info(json.dumps({"event": "account_delete",
+                                  "user": hashlib.sha256(user_id.encode()).hexdigest()[:12], "counts": counts}))
+    return counts

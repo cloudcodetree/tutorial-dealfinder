@@ -389,6 +389,25 @@ def watchlist_add(item: WatchIn, who: Principal = Depends(require_account)):
         raise HTTPException(status_code=409, detail=f"watchlist limit reached ({userstore.WATCH_LIMIT})") from exc
 
 
+@app.get("/account/export")
+def account_export(who: Principal = Depends(require_account)):
+    """Download everything DealFinder holds for the signed-in user, as one JSON file."""
+    _require_db()
+    from . import userstore
+    return JSONResponse(jsonable_encoder(userstore.export_user(who.user_id)),
+                        headers={"Content-Disposition": 'attachment; filename="dealfinder-export.json"',
+                                 "Cache-Control": "no-store"})
+
+
+@app.delete("/account")
+def account_delete(who: Principal = Depends(require_account)):
+    """Delete the signed-in user's DealFinder data. The sign-in account is shared with
+    cloudcodetree.com, so it is kept, and the answer says so."""
+    _require_db()
+    from . import userstore
+    return {"deleted": userstore.delete_user(who.user_id), "sign_in_account": "kept"}
+
+
 @app.get("/watchlist")
 def watchlist_list(who: Principal = Depends(require_account)):
     """The signed-in user's watchlist. RLS guarantees they see only their own items;
