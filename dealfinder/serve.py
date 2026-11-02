@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import re
 import statistics
 import time
 import uuid
@@ -274,6 +275,8 @@ def ranked(q: str, background: BackgroundTasks, k: int = 12,
 _LAB = Path(__file__).parent / "static" / "lab"
 # The only files /lab/{name} serves. Anything else is a 404, so no path reaches the package.
 LAB_ASSETS = {"lab.css": "text/css", "lab.js": "text/javascript", "lessons.json": "application/json"}
+# The sign-in library's tag (jsDelivr, pinned by SRI), with the comment above it.
+_CDN_SCRIPT = re.compile(r'(?:<!--[^>]*-->\n)?<script src="https://cdn\.jsdelivr\.net/[^"]+"[^>]*></script>\n')
 
 
 def _live_data() -> bool:
@@ -294,9 +297,13 @@ def lab(request: Request) -> HTMLResponse:
     the request carries the edge header. Served directly on :8000 the base is empty."""
     html = (_LAB / "index.html").read_text()
     base = "/api" if "x-dealfinder-edge" in request.headers else ""
+    live = _live_data()
     html = html.replace('<meta name="api-base" content="">', f'<meta name="api-base" content="{base}">', 1)
     html = html.replace('<meta name="live-data" content="off">',
-                        f'<meta name="live-data" content="{"on" if _live_data() else "off"}">', 1)
+                        f'<meta name="live-data" content="{"on" if live else "off"}">', 1)
+    if not live:
+        # No live data means no sign-in, so the page loads nothing from another host.
+        html = _CDN_SCRIPT.sub("", html)
     return HTMLResponse(html)
 
 

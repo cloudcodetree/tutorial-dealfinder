@@ -96,3 +96,20 @@ def test_lab_marks_live_data_on_with_a_source(monkeypatch):
 def test_lab_says_why_live_modes_are_off():
     js = _js()
     assert "Live store data is off until DealFinder has a Best Buy API key." in js
+
+
+def test_lab_loads_no_third_party_script_without_live_data(monkeypatch):
+    # The privacy page says the site loads nothing from other companies. With no live
+    # data there is no sign-in, so the lab drops the supabase-js tag from jsDelivr.
+    monkeypatch.setattr(live_sources, "enabled_sources", lambda names=None: [_Off()])
+    html = client.get("/lab").text
+    assert "cdn.jsdelivr.net" not in html and "<script" in html
+
+
+def test_lab_keeps_the_pinned_sign_in_script_with_live_data(monkeypatch):
+    class _On(_Off):
+        def available(self):
+            return True
+    monkeypatch.setattr(live_sources, "enabled_sources", lambda names=None: [_On()])
+    assert 'src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-' \
+        in client.get("/lab").text
