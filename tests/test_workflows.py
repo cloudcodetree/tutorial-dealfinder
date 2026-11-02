@@ -113,3 +113,21 @@ def test_the_deploy_build_takes_the_public_sentry_dsn_from_a_repo_variable():
     steps = _deploy_steps()
     build = steps[_index(steps, "npm ci && npm run build")]
     assert build["env"] == {"VITE_SENTRY_DSN": "${{ vars.VITE_SENTRY_DSN }}"}
+
+
+def test_no_event_expressions_in_run_steps():
+    # An event field (a PR title, a branch name) expanded inside run: is shell injection.
+    import re
+    bad = []
+    for wf in Path(".github/workflows").glob("*.yml"):
+        for job in (yaml.safe_load(wf.read_text()).get("jobs") or {}).values():
+            for step in job.get("steps", []):
+                if re.search(r"\$\{\{\s*(github\.event\.|github\.head_ref|inputs\.)", step.get("run", "")):
+                    bad.append(f"{wf.name}: {step.get('name') or step['run'][:40]}")
+    assert bad == []
+
+
+def test_no_cron_on_github_actions():
+    # Scheduling is Cloud Scheduler or a Worker Cron Trigger: GitHub's terms bar Actions as an app's cron.
+    for wf in Path(".github/workflows").glob("*.yml"):
+        assert "schedule" not in (yaml.safe_load(wf.read_text()).get(True) or {}), wf.name   # PyYAML reads `on:` as True

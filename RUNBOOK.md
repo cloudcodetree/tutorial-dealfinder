@@ -326,3 +326,38 @@ npx wrangler rollback <VERSION_ID>
 `COST.md`, Teardown section D: `tofu destroy`, `wrangler delete` for both Workers, then
 `DROP ROLE dealfinder_svc;` as the database admin. The `dealfinder` schema and its
 two group roles stay in the shared project until you drop them too.
+
+---
+
+## Secrets
+
+Every credential the live product holds at launch. Values live only in Secret Manager
+`dealfinder-env` (written by `deploy/secrets.py`, which keeps one active version), in
+Worker secrets, or in GitHub. The Best Buy, eBay, R2, Resend and job-check keys arrive
+with the alerts follow-up and get rows then. `P` is `dealfinder-prod-cct`.
+
+To rotate a `dealfinder-env` key: put the new value in `.env`, run
+`python deploy/secrets.py push --project P`, then roll a fresh revision (§8, "Rotate a
+credential"). Running instances keep the old value until then.
+
+| Key | Store | Scope | Spend cap | Rotate | Verify |
+|---|---|---|---|---|---|
+| `DATABASE_URL` | `dealfinder-env` | login role `dealfinder_svc` on the shared Supabase project, transaction pooler, TLS verify-full | Supabase Free, no billing | `python deploy/create_login_role.py --project P --rotate`, then roll a revision | `/api/readyz` answers `{"db":"ok","schema":"current"}` |
+| `EDGE_SHARED_SECRET` | `dealfinder-env` and the Worker's secret | proves a request came through the Worker | none | not scripted yet: write a new value to both stores, Cloud Run first, then `python deploy/secrets.py edge --project P`; requests get 403 in between | `/api/check?title=Sony%20WH-1000XM5&price=199` through the Worker answers 200 |
+| `UNSUBSCRIBE_SECRET` | `dealfinder-env` | signs unsubscribe links; unused until alerts ship | none | not needed until alerts ship | none at launch |
+| `CLOUDFLARE_ACCOUNT_ID` | `dealfinder-env` | not secret; with the AI token it routes `/ask` to Workers AI | none | `push` with the new value | `/api/ask?q=tv` answers `"provider": "workers-ai"` |
+| `CLOUDFLARE_AI_TOKEN` | `dealfinder-env` | Workers AI Read on the Cloudflare account | Workers AI Free fails past 10,000 neurons a day | new token in the dashboard, `push`, roll a revision, then revoke the old one | `/api/ask?q=tv` answers `"provider": "workers-ai"` |
+| `SENTRY_DSN` | `dealfinder-env` | backend errors to the Sentry project `dealfinder-api` | Sentry Developer drops past 5,000 errors a month | new client key in Sentry, `push`, roll a revision, disable the old key | the drill message (Plan 5 Task 14) shows in Sentry |
+| `HEALTHCHECK_UPTIME_URL` | Worker secret on `dealfinder-edge-staging` | pings the `dealfinder-uptime` check | Healthchecks Hobbyist, 20 checks | `python scripts/healthchecks_setup.py --out <file>`, then `npx wrangler secret put HEALTHCHECK_UPTIME_URL` in `edge/` | Healthchecks shows a ping within 10 minutes |
+| `CLOUDFLARE_EDGE_TOKEN` | GitHub repo secret | account token `dealfinder-edge-ci`: Workers Editor on the account, Workers Routes Write on `cloudcodetree.com` | no billing | new token in the dashboard, `gh secret set CLOUDFLARE_EDGE_TOKEN` (stdin), delete the old token | the next push to `main` deploys the Worker |
+| `VITE_SENTRY_DSN` | GitHub repo variable (public by design) | front-end errors to the Sentry project `dealfinder-web` | the same 5,000 errors | `gh variable set VITE_SENTRY_DSN --body <dsn>` | an error on the site shows in `dealfinder-web` |
+
+Spend caps, written down:
+- Workers AI Free fails past 10,000 neurons a day, shared with cloudcodetree.com.
+- Sentry Developer drops events past 5,000 errors a month. It never bills.
+- Best Buy and eBay have no billing, and production holds neither key yet.
+- OpenRouter has no production key: production refuses it (`llm.provider()`).
+- GCP has the $1 budget alert (`deploy/gcp/budget.tf`).
+- `CallRateGuard` (`dealfinder/observability.py`) sends one Sentry warning per key per
+  day at 80% of a daily cap.
+
