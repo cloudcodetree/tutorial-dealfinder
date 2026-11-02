@@ -1,88 +1,64 @@
-# DealFinder web front end (Part 27)
+# DealFinder front end
 
-A small Vite + React + TypeScript SPA over the DealFinder FastAPI backend. It
-streams live search results as they arrive and (optionally) signs the user in
-with Supabase.
+The shopper page at `deals.beta.cloudcodetree.com` (the launch host later): **Check a deal**,
+plus **How we rank** and **Privacy**. React 18 + Vite + TypeScript + react-router.
+The course lab is not here: the backend serves it at `/lab` (`dealfinder/static/lab/`).
 
-## What it does
-
-- **Streaming search.** The search bar subscribes to `GET /search/stream?q=…`
-  via `EventSource` and renders results **incrementally** — one batch per
-  `results` frame, as each source responds — then shows the total **count** and
-  **median** from the terminal `done` frame. If the stream errors before
-  finishing, it **falls back** to a single `GET /search?q=…` fetch.
-- **Deal badges.** Each offer is a `ResultCard` (title · source · `deal_pct` ·
-  price) with a `DealBadge` using the four canonical badge tokens:
-  **`DEAL` · `FAIR` · `SUSPICIOUS` · `OVERPRICED`** (see `src/components/DealBadge.tsx`).
-  The stream frames carry `{id, title, price, source}`; `deal_pct` is filled in
-  from the median once the `done` frame lands (the `/search` fallback returns
-  `deal_pct` directly).
-- **Auth (Supabase).** Sign in / session / sign out with `@supabase/supabase-js`.
-  On an active session it calls the protected `GET /me` with the session's
-  bearer token and shows the verified identity; a **pro** affordance is gated by
-  the user's `role`.
-
-## Configuration
-
-Copy `.env.example` → `.env.local`:
-
-| Var | Purpose |
-| --- | --- |
-| `VITE_API_BASE` | Backend origin. Blank in dev → uses the Vite proxy. |
-| `VITE_SUPABASE_URL` | Your Supabase project URL (Project Settings → API). |
-| `VITE_SUPABASE_ANON_KEY` | Your Supabase anon (public) key. |
-
-Only `VITE_`-prefixed, **public** values belong here — the Supabase anon key is
-public by design; never put a service-role key or any other secret in the frontend.
+The browser never computes a verdict. It shows what `GET /api/check` returns: the
+verdict badge (`DEAL`, `FAIR`, `SUSPICIOUS` or `OVERPRICED`) only when there is one,
+the reason, and the model's fair price.
 
 ## Run it
 
 ```bash
-# 1. Start the backend (from the repo root) on :8000
-uvicorn dealfinder.serve:app --reload
+# 1. the backend, from the repo root
+.venv/bin/uvicorn dealfinder.serve:app --port 8000
 
-# 2. Start the SPA
+# 2. the front end
 cd frontend
-npm install
-npm run dev        # http://localhost:5173
+npm ci
+npm run dev -- --host 127.0.0.1      # http://127.0.0.1:5173
 ```
 
-The Vite dev server proxies `/search`, `/search/stream`, and `/me` to
-`http://localhost:8000`, so `EventSource` and the bearer-token `/me` call work
-same-origin without CORS.
-
-### Live vs. anonymous
-
-- **Public search works with no keys at all** — the backend streams from
-  whatever sources are configured (offline it falls back to the keyless iTunes
-  source), so you'll see cards stream in immediately.
-- **Sign-in + `/me` + the pro gate need the learner's own Supabase project.**
-  Set `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` here, and set the matching
-  `SUPABASE_URL` on the backend, whose JWKS verifies the token (see `dealfinder/auth.py`). Without them,
-  the Auth panel says auth is off and the app runs anonymously.
+The app calls one path everywhere, the same-origin `/api`. In development Vite's proxy
+sends `/api/*` to the backend with `/api` stripped (`vite.config.ts`). In production
+the deals Worker (`edge/`) does the same. Point the proxy elsewhere with
+`VITE_API_PROXY_TARGET=http://host:port npm run dev`. No keys are needed: sign-in
+settings, when sign-in ships, come from the backend's `/config.json`.
 
 ## Build
 
 ```bash
-npm run build      # type-checks (tsc -b) then emits ./dist
+npm run build      # tsc -b, then vite build → dist/
 ```
 
-`node_modules/` and `dist/` are gitignored.
+`dist/` is what the Worker serves as static assets. `public/robots.txt` keeps
+crawlers off `/api/` and `/lab`.
+
+## Tests
+
+Playwright builds the app and serves `dist/` with `vite preview` on `:4173`. Run
+`npx playwright install chromium` once.
+
+| Mode | Command | Needs |
+|---|---|---|
+| Stubbed (default, what CI runs) | `npx playwright test` | nothing: `e2e/fixtures.ts` `stubApi` answers `/api/*` and blocks every other host |
+| Live | `E2E_LIVE=1 npx playwright test e2e/live.spec.ts --project=desktop` | the backend on `:8000` |
+
+Every spec runs twice: `desktop` and `mobile-375`. `e2e/a11y.spec.ts` runs axe
+(WCAG 2.1 A and AA) on every page and checks that nothing scrolls sideways at
+375 px, even with a 120-character unbroken product title. CI's `frontend` job runs
+the stubbed suite and uploads `playwright-report/` when it fails.
 
 ## Layout
 
 ```
-frontend/
-├── index.html
-├── vite.config.ts          # dev proxy → :8000
-├── src/
-│   ├── main.tsx
-│   ├── App.tsx
-│   ├── api.ts              # useSearch (SSE) + /search fetch fallback + fetchMe
-│   ├── lib/supabase.ts     # supabase-js client from VITE_ env
-│   └── components/
-│       ├── SearchBar.tsx
-│       ├── ResultCard.tsx
-│       ├── DealBadge.tsx   # the four §9.7 badge tokens
-│       └── Auth.tsx
+src/
+  api.ts                 checkDeal, getConfig, ApiError: the only backend client
+  App.tsx                routes: / and /check, /how-we-rank, /privacy, not found
+  components/            Layout, CheckForm, VerdictBadge
+  pages/                 CheckPage, ContentPage (renders src/content/*.md), NotFound
+  content/               how-we-rank.md, privacy.md
+  theme/                 tokens.css (the Nocturne tokens, AA verdict colors), base.css, layout.css, check.css
+e2e/                     fixtures.ts, shell, check, pages, a11y, live specs
 ```
