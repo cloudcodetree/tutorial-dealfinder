@@ -23,9 +23,14 @@
   "vars": {
     // Task 12 sets this from `tofu -chdir=deploy/gcp output -raw api_url`.
     "BACKEND_ORIGIN": "https://dealfinder-api-hhpo3lei6q-uc.a.run.app",
+    // The address a visitor uses. The uptime probe fetches it through this Worker.
+    "PUBLIC_ORIGIN": "https://deals.beta.cloudcodetree.com",
     "LAUNCHED": "false"
   },
+  // The uptime probe (src/uptime.ts). Workers Free allows 5 Cron Triggers per account.
+  "triggers": { "crons": ["*/10 * * * *"] },
   // Invocation logs stay off, so no URL with query text is ever logged (site precedent).
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }
-  // Secret: EDGE_SHARED_SECRET (python deploy/secrets.py edge).
+  // Secrets: EDGE_SHARED_SECRET (python deploy/secrets.py edge), HEALTHCHECK_UPTIME_URL
+  // (scripts/healthchecks_setup.py writes it to the scratchpad; wrangler secret put).
 }

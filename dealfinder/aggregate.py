@@ -24,6 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 
+from . import observability
 from .dedup import dedup_by_embedding
 from .ingest import dedup_key
 from .live_sources import enabled_sources
@@ -81,6 +82,8 @@ def aggregate(query: str, sources=None, limit: int = 24, target: int = TARGET_RE
         if not batch:
             return
         pool = ThreadPoolExecutor(max_workers=len(batch))
+        for src in batch:   # counted here: the pool's threads do not see the request's cost scope
+            observability.add_source_call(src.name)
         futures = {pool.submit(timed_search, src): src for src in batch}
         _, pending = wait(futures, timeout=timeout_s)
         pool.shutdown(wait=False, cancel_futures=True)

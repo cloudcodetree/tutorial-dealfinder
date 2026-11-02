@@ -6,6 +6,7 @@ discussed in the tutorial; this is the shape they hang off.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -13,6 +14,7 @@ import math
 import os
 import re
 import statistics
+import threading
 import time
 import uuid
 from functools import lru_cache
@@ -25,9 +27,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from . import db, licensing, live_sources, migrate, pgstore, ratelimit, shop
+from . import db, licensing, live_sources, migrate, observability, pgstore, ratelimit, shop
 from .aggregate import aggregate
 from .auth import User, require_user
+from .cache import TTLCache
 from .deal import deal_score
 from .dealscore import fair_price
 from .features import featurize
@@ -37,6 +40,8 @@ from .rag import _category_models, _load_medians
 from .tenancy import Principal, current_principal, require_account
 from .tools import load_catalog
 
+# Sentry starts before the app exists, so its FastAPI integration wraps it.
+observability.init_sentry()
 app = FastAPI(title="DealFinder")
 
 # Per-instance limits for the anonymous routes (ratelimit.LIMITS). Module-level so
@@ -70,6 +75,10 @@ async def edge_guard(request: Request, call_next):
         if not hmac.compare_digest(got.encode(), secret.encode()):
             return JSONResponse({"detail": "direct access not allowed"}, status_code=403)
     return await call_next(request)
+
+
+# Outermost of all: every request, refused or served, gets one log line and its cost.
+app.add_middleware(observability.RequestLogMiddleware)
 
 
 def _json_safe(value):
@@ -380,6 +389,25 @@ def watchlist_add(item: WatchIn, who: Principal = Depends(require_account)):
         raise HTTPException(status_code=409, detail=f"watchlist limit reached ({userstore.WATCH_LIMIT})") from exc
 
 
+@app.get("/account/export")
+def account_export(who: Principal = Depends(require_account)):
+    """Download everything DealFinder holds for the signed-in user, as one JSON file."""
+    _require_db()
+    from . import userstore
+    return JSONResponse(jsonable_encoder(userstore.export_user(who.user_id)),
+                        headers={"Content-Disposition": 'attachment; filename="dealfinder-export.json"',
+                                 "Cache-Control": "no-store"})
+
+
+@app.delete("/account")
+def account_delete(who: Principal = Depends(require_account)):
+    """Delete the signed-in user's DealFinder data. The sign-in account is shared with
+    cloudcodetree.com, so it is kept, and the answer says so."""
+    _require_db()
+    from . import userstore
+    return {"deleted": userstore.delete_user(who.user_id), "sign_in_account": "kept"}
+
+
 @app.get("/watchlist")
 def watchlist_list(who: Principal = Depends(require_account)):
     """The signed-in user's watchlist. RLS guarantees they see only their own items;
@@ -465,6 +493,7 @@ def _stream_search(query: str, sources):
         try:
             if not src.available():
                 continue
+            observability.add_source_call(src.name)
             found = src.search(query) or []
         except Exception:
             # a flaky/rate-limited source never breaks the stream
@@ -539,24 +568,78 @@ def semantic(q: str, k: int = 12, who: Principal = Depends(current_principal)):
     return {"query": q, "count": len(results), "results": results, "backend": "snapshot"}
 
 
+class _DailyCount:
+    """A per-instance count that starts again each UTC day."""
+
+    def __init__(self):
+        self._day, self._n, self._lock = None, 0, threading.Lock()
+
+    def take(self, limit: int) -> bool:
+        """Count one more if under `limit`. False once the day's limit is spent."""
+        from datetime import datetime, timezone
+        with self._lock:
+            today = datetime.now(timezone.utc).date()
+            if today != self._day:
+                self._day, self._n = today, 0
+            if self._n >= limit:
+                return False
+            self._n += 1
+            return True
+
+
+# Prices change, so a cached answer expires. The key is a hash: no query text is kept.
+_ASK_CACHE = TTLCache(ttl_s=float(os.getenv("ASK_CACHE_TTL_S", "900")))
+# LLM-written answers per instance per day. Past the cap, asks take the deterministic
+# path, which leaves headroom in Workers AI's shared 10,000-neuron allocation.
+_ASK_LLM_COUNT = _DailyCount()
+
+
+class _NoLLM:
+    """Handed to the answer pipeline past the daily cap: it reports no provider, so
+    the deterministic path answers."""
+
+    @staticmethod
+    def available() -> bool:
+        return False
+
+
+def _llm_for_this_request():
+    """None (use the configured provider) while today's cap has room, else _NoLLM.
+    One cap covers every route that can call a model: /ask, /ask_agentic, /review."""
+    from . import llm
+    if llm.available() and not _ASK_LLM_COUNT.take(int(os.getenv("ASK_LLM_DAILY_MAX", "300"))):
+        return _NoLLM()
+    return None
+
+
+def _written_by(used_llm: bool) -> dict:
+    from . import llm
+    return {"ai_written": used_llm, "provider": llm.provider() if used_llm else None}
+
+
+def _ask_key(q: str, k: int) -> str:
+    return hashlib.sha256((" ".join(q.split()).lower() + "|" + str(k)).encode()).hexdigest()
+
+
 @app.get("/ask")
 def ask(q: str, k: int = 5):
-    """RAG: retrieve real listings for the query, then GENERATE a grounded answer.
+    """RAG: retrieve real listings for the query, then generate a grounded answer.
 
-    Returns the `RagAnswer` — the synthesized answer, the retrieved item ids it
-    used as `sources`, whether it passed the faithfulness check (`grounded`), and
-    whether an LLM produced it (`used_llm`). With no OPENROUTER_API_KEY the
-    deterministic extractive path answers, so this route works fully offline."""
-    from .rag import answer as rag_answer
+    Returns the answer, the retrieved item ids it used (`sources`), whether it passed
+    the faithfulness check (`grounded`), and whether a model wrote it (`used_llm`,
+    `ai_written`, `provider`). With no LLM provider, or past the daily cap, the
+    deterministic extractive path answers, so this route always works."""
+    from . import rag
 
-    a = rag_answer(q, k=k)
-    return {
-        "query": q,
-        "answer": a.answer,
-        "sources": a.sources,
-        "grounded": a.grounded,
-        "used_llm": a.used_llm,
-    }
+    key = _ask_key(q, k)
+    cached = _ASK_CACHE.get(key)
+    if cached is not None:
+        return {"query": q, **cached}
+    a = rag.answer(q, k=k) if _llm_for_this_request() is None else rag.deterministic_answer(q, k=k)
+    body = {"answer": a.answer, "sources": a.sources, "grounded": a.grounded, "used_llm": a.used_llm,
+            **_written_by(a.used_llm)}
+    _ASK_CACHE.put(key, body)
+    return {"query": q, **body}
 
 
 @app.get("/ask_agentic")
@@ -569,12 +652,13 @@ def ask_agentic(q: str, max_hops: int = 3):
     the sufficiency gate and the corpus-mined reformulator are deterministic."""
     from .agentic_rag import agentic_answer
 
-    a = agentic_answer(q, max_hops=max_hops)
+    a = agentic_answer(q, max_hops=max_hops, llm=_llm_for_this_request())
     return {
         "query": q,
         "answer": a.answer,
         "grounded": a.grounded,
         "used_llm": a.used_llm,
+        **_written_by(a.used_llm),
         "sources": a.sources,
         "hops": [
             {"query": h.query, "sufficient": h.sufficient, "reason": h.reason, "verdicts": h.verdicts}
@@ -610,7 +694,9 @@ def review_multiagent(q: str, k: int = 5, trap: bool = False):
 
     # Pin retrieval to the reproducible snapshot (orchestrate's contract) so the
     # writer/reviewer trail is stable regardless of any attached DATABASE_URL.
-    writer = _TrapWriter() if trap else None
+    # The trap writer is the lesson's own fake model: it calls no provider, so the cap
+    # does not apply to it.
+    writer = _TrapWriter() if trap else _llm_for_this_request()
     draft = orch.recommend(q, k=k, llm=writer)
     draft_review = orch.review(q, draft, k=k)
     if draft_review.approved:
@@ -630,6 +716,8 @@ def review_multiagent(q: str, k: int = 5, trap: bool = False):
         "revised": revised,
         "final": final,
         "final_review": _rv(final_review),
+        # A model wrote what the shopper sees only when its draft was approved as is.
+        **_written_by(draft.used_llm and not revised),
     }
 
 

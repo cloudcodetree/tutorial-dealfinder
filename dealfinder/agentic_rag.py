@@ -141,7 +141,7 @@ def reformulate(base: str, items: list[rag.RetrievedItem], lexicon: dict, tried:
     return f"{base} deal".strip(), None
 
 
-def agentic_answer(query: str, max_hops: int = 3, products=None, embeddings=None) -> AgenticAnswer:
+def agentic_answer(query: str, max_hops: int = 3, products=None, embeddings=None, *, llm=None) -> AgenticAnswer:
     """Retrieve → judge → reformulate & retry if weak → answer, grounded.
 
     Returns the final grounded answer plus every hop's query and gate decision, so
@@ -169,7 +169,7 @@ def agentic_answer(query: str, max_hops: int = 3, products=None, embeddings=None
             tried.add(phrase)
 
     # Generate the grounded answer from the final (best) hop's query.
-    final = rag.answer(current, k=5)
+    final = rag.answer(current, k=5, llm=llm)   # llm=None: the configured provider, if any
     return AgenticAnswer(
         answer=final.answer,
         grounded=final.grounded,

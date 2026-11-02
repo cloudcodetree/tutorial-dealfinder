@@ -113,3 +113,8 @@ def test_lab_keeps_the_pinned_sign_in_script_with_live_data(monkeypatch):
     monkeypatch.setattr(live_sources, "enabled_sources", lambda names=None: [_On()])
     assert 'src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" integrity="sha384-' \
         in client.get("/lab").text
+
+
+def test_lab_labels_model_written_answers():
+    js = _js()
+    assert "d.ai_written" in js and "AI-written" in js

@@ -12,6 +12,7 @@
     "test:e2e:live": "E2E_LIVE=1 playwright test"
   },
   "dependencies": {
+    "@sentry/react": "11.7.0",
     "@supabase/supabase-js": "^2.45.4",
     "marked": "12.0.2",
     "react": "^18.3.1",

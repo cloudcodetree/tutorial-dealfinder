@@ -1,4 +1,13 @@
-"""OpenRouter LLM client with a model tier + graceful degradation.
+"""The LLM client: Cloudflare Workers AI first, OpenRouter for development only.
+
+Workers AI is the production provider. Cloudflare says it "does not use Customer
+Content processed by Workers AI to train AI models" and keeps no inputs or outputs
+after the request (https://developers.cloudflare.com/workers-ai/platform/privacy/).
+Past the free allocation it errors instead of billing, and every caller already
+falls back to its deterministic path on any LLM error. OpenRouter's free models may
+log prompts, so production refuses it.
+
+OpenRouter (development):
 
 Same anti-throttle idea as the sources: try a primary model, fall through to
 fallbacks on rate-limit/unavailability (429/402/403/404), and let callers
@@ -16,7 +25,11 @@ import re
 
 import httpx
 
+from . import observability, settings
+
 _ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+_WORKERS_AI = "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
+WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast"
 _SKIP = {402, 403, 404, 429, 502, 503}  # unavailable/throttled → try next model
 
 
@@ -33,15 +46,52 @@ def models() -> list[str]:
     ]
 
 
+def provider() -> str | None:
+    """"workers-ai" when its account and token are set; "openrouter" when its key is set
+    and this is not production; else None, and callers take their deterministic path."""
+    if os.getenv("CLOUDFLARE_ACCOUNT_ID") and os.getenv("CLOUDFLARE_AI_TOKEN"):
+        return "workers-ai"
+    if os.getenv("OPENROUTER_API_KEY") and not settings.is_production():
+        return "openrouter"
+    return None
+
+
 def available() -> bool:
-    return bool(os.getenv("OPENROUTER_API_KEY"))
+    return provider() is not None
+
+
+def _workers_ai_chat(messages: list[dict], temperature: float) -> str:
+    model = os.getenv("WORKERS_AI_MODEL", WORKERS_AI_MODEL)
+    url = _WORKERS_AI.format(account=os.environ["CLOUDFLARE_ACCOUNT_ID"], model=model)
+    try:
+        r = httpx.post(url, headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_AI_TOKEN']}"},
+                       json={"messages": messages, "temperature": temperature}, timeout=60)
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"workers-ai: {type(e).__name__}") from None
+    if r.status_code == 404 or "no such model" in r.text.lower():
+        import sentry_sdk
+        sentry_sdk.capture_message(f"workers-ai model missing: {model}", level="error")
+        raise RuntimeError(f"workers-ai model missing: {model}")
+    if r.status_code != 200:
+        raise RuntimeError(f"workers-ai: HTTP {r.status_code}")
+    result = r.json().get("result") or {}
+    observability.add_llm_usage("workers-ai", model, result.get("usage"))
+    text = result.get("response")
+    if not isinstance(text, str):
+        raise RuntimeError("workers-ai: no response text")
+    return text
 
 
 def chat(messages: list[dict], temperature: float = 0, json_mode: bool = False,
          model_tier: list[str] | None = None) -> str:
-    key = os.getenv("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY not set")
+    """One completion from the configured provider. Workers AI takes no response_format,
+    so JSON callers parse the first JSON object out of the text (_first_json)."""
+    which = provider()
+    if which == "workers-ai":
+        return _workers_ai_chat(messages, temperature)
+    if which is None:
+        raise RuntimeError("no LLM provider configured")
+    key = os.environ["OPENROUTER_API_KEY"]
     last = "no models"
     for model in (model_tier or models()):
         body: dict = {"model": model, "temperature": temperature, "messages": messages}
@@ -53,7 +103,9 @@ def chat(messages: list[dict], temperature: float = 0, json_mode: bool = False,
             last = f"{model}: {e}"
             continue
         if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"]
+            body = r.json()
+            observability.add_llm_usage("openrouter", model, body.get("usage"))
+            return body["choices"][0]["message"]["content"]
         last = f"{model}: HTTP {r.status_code}"
         if r.status_code in _SKIP:
             continue          # throttled / unavailable → next tier
@@ -75,3 +127,19 @@ def extract_products(page_text: str, query: str, max_items: int = 15) -> list[di
     )
     data = _first_json(chat([{"role": "user", "content": prompt}], temperature=0, json_mode=True))
     return (data.get("products") or [])[:max_items]
+
+
+if __name__ == "__main__":
+    # python -m dealfinder.llm probe: one tiny Workers AI call. Prints only the shape
+    # of the response (key names), never the text, so a run can confirm where the
+    # answer and the usage live before anything relies on them.
+    import sys
+
+    if sys.argv[1:] != ["probe"] or provider() != "workers-ai":
+        sys.exit("usage: CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_AI_TOKEN=… python -m dealfinder.llm probe")
+    model = os.getenv("WORKERS_AI_MODEL", WORKERS_AI_MODEL)
+    r = httpx.post(_WORKERS_AI.format(account=os.environ["CLOUDFLARE_ACCOUNT_ID"], model=model),
+                   headers={"Authorization": f"Bearer {os.environ['CLOUDFLARE_AI_TOKEN']}"},
+                   json={"messages": [{"role": "user", "content": "Say ok."}], "max_tokens": 5}, timeout=60)
+    body = r.json()
+    print(f"HTTP {r.status_code}; keys: {sorted(body)}; result keys: {sorted(body.get('result') or {})}")

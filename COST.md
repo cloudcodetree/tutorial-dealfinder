@@ -82,7 +82,10 @@ without Best Buy").
 | Workers `dealfinder-edge-staging` (beta host) and `dealfinder-edge` (no domain until launch) | 100,000 requests a day per account on Workers Free ([pricing](https://developers.cloudflare.com/workers/platform/pricing/)) | every page view and API call is one request | edge cache for anonymous search, rate limits on the LLM routes | `npx wrangler delete <name>` for each (in `edge/`) |
 | Supabase `cct-demos` (shared with cloudcodetree.com) | 500 MB database on the free plan ([pricing](https://supabase.com/pricing)) | no visitor data at launch | own `dealfinder` schema; Best Buy rows purged before 72 hours once a key exists | `DROP ROLE dealfinder_svc` (see `RUNBOOK.md`) |
 | Best Buy API | 50,000 calls a day, no billing | not used at launch | no key yet | none |
-| Healthchecks.io | 20 checks on Hobbyist | not used at launch | Plan 5 adds the uptime check | none |
+| Healthchecks.io | 20 checks on Hobbyist ([pricing](https://healthchecks.io/pricing/)) | 1 check, `dealfinder-uptime` | the job checks wait with their jobs | delete the check in Healthchecks |
+| Sentry | Developer: 5,000 errors a month, 1 user ([pricing](https://sentry.io/pricing/)) | a handful of errors | errors only, 5% of requests traced; past the quota Sentry drops events, it never bills | delete `dealfinder-api` and `dealfinder-web` in Sentry |
+| Workers AI (the lab's Ask mode) | 10,000 neurons a day, shared with cloudcodetree.com's search ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)) | about 7 neurons an ask | answers cached 15 min; `ASK_LLM_DAILY_MAX` (300) per instance, then the deterministic answer; past the allocation calls fail, never bill | revoke `CLOUDFLARE_AI_TOKEN` |
+| Worker uptime cron | 5 Cron Triggers per account on Workers Free ([limits](https://developers.cloudflare.com/workers/platform/limits/)) | 1 trigger, every 10 min: 4,320 runs a month | part of the Worker's 100,000 requests a day | remove `triggers` from `edge/wrangler.jsonc` and deploy |
 
 Check the live footprint any time:
 

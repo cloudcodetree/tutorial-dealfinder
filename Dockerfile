@@ -32,4 +32,6 @@ USER 10001
 EXPOSE 8000
 # The CMD must match the ASGI app in dealfinder/serve.py (test_deploy guards this).
 # Cloud Run sets PORT. Locally it defaults to 8000.
-CMD ["sh", "-c", "exec uvicorn dealfinder.serve:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# --no-access-log: uvicorn's access line prints the full URL, query included.
+# observability.RequestLogMiddleware writes the request log instead.
+CMD ["sh", "-c", "exec uvicorn dealfinder.serve:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]

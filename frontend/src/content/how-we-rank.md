@@ -13,7 +13,7 @@ You enter a product and the price you see. We compare that price with our price 
 
 ## Where the fair price comes from
 
-The model is trained per product category on a fixed July 2026 snapshot of store prices. It does not see today's prices, so a fair price can be out of date. Check the store before you buy.
+The model is trained per product category on a fixed July 2026 snapshot of store prices. It does not see today's prices, so a fair price can be out of date. Prices change, so check the store before you buy.
 
 If the model cannot place your product in a category it knows, you get no verdict. We say so instead of guessing.
 
@@ -21,6 +21,10 @@ If the model cannot place your product in a category it knows, you get no verdic
 
 - The seller's "was" price is never used. A struck-through regular price says nothing about what the product is worth.
 - There is no paid placement and there are no affiliate links. Nobody pays us to change a verdict.
+
+## AI-written text
+
+The shopper page shows no text written by a model. Every verdict and reason above comes from fixed rules and the price model. In the lab's Ask mode a model can write the answer, and that answer is labeled AI-written.
 
 ## What is not here yet
 

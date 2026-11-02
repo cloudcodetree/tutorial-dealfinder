@@ -18,12 +18,9 @@ test("privacy page states only what is true now", async ({ page }) => {
   await page.goto("/privacy");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy");
   const main = page.locator("main");
-  await expect(main).toContainText("Draft: final policy lands before launch");
   await expect(main).toContainText("Checking a price needs no account");
   await expect(main).toContainText(/sets no cookies/i);
-  await expect(main).toContainText(/request logs/i);              // the URL, with what you typed, is logged
-  await expect(main).toContainText(/user agent/i);                // the browser's user agent is logged too
-  await expect(main).not.toContainText(/email alerts|Sentry|Resend|watchlist|saved searches/i);
+  await expect(main).not.toContainText(/email alerts|Resend|watchlist|saved searches/i);   // these arrive with alerts
 });
 
 test("shopper pages set no cookies and call no third parties", async ({ page, context }) => {

@@ -6,6 +6,11 @@ query is within a cosine threshold — a big cost/latency win on repetitive traf
 """
 from __future__ import annotations
 
+import threading
+import time
+from collections import OrderedDict
+from typing import Any, Callable
+
 import numpy as np
 
 
@@ -27,3 +32,35 @@ class SemanticCache:
         sims = (V @ q) / (np.linalg.norm(V, axis=1) * np.linalg.norm(q) + 1e-9)
         i = int(np.argmax(sims))
         return self._vals[i] if sims[i] >= self.threshold else None
+
+
+class TTLCache:
+    """An exact-key cache whose entries expire. Past `maxsize` the least recently used go
+    first. Thread-safe, because FastAPI runs sync routes on a thread pool."""
+
+    def __init__(self, maxsize: int = 512, ttl_s: float = 900, clock: Callable[[], float] = time.monotonic):
+        self.maxsize, self.ttl_s, self._clock = maxsize, ttl_s, clock
+        self._data: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Any | None:
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            if self._clock() >= entry[0]:
+                del self._data[key]
+                return None
+            self._data.move_to_end(key)
+            return entry[1]
+
+    def put(self, key: str, value: Any) -> None:
+        with self._lock:
+            self._data[key] = (self._clock() + self.ttl_s, value)
+            self._data.move_to_end(key)
+            while len(self._data) > self.maxsize:
+                self._data.popitem(last=False)
+
+    def keys(self) -> list[str]:
+        with self._lock:
+            return list(self._data)

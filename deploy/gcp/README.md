@@ -10,6 +10,26 @@ Local state, single operator, the same as the site's `infra/`.
 values (`deploy/secrets.py`), the database login role (`deploy/create_login_role.py`),
 or anything at Cloudflare (`edge/wrangler.jsonc`).
 
+**Also owns** the log exclusion that drops Cloud Run's automatic request log
+(`logging.tf`): that log records each request's full URL, query included.
+
+## State lives outside the repo
+
+`terraform.tfstate` and `prod.tfvars` are gitignored, so a copy that sits in one
+checkout dies with it, and a second checkout would start a second, diverging state.
+Keep exactly one copy, outside every checkout, and link it into whichever one you run
+from:
+
+```bash
+D=~/.local/share/dealfinder-tofu        # mode 700, files mode 600
+ln -s $D/terraform.tfstate deploy/gcp/terraform.tfstate
+ln -s $D/terraform.tfstate.backup deploy/gcp/terraform.tfstate.backup
+ln -s $D/prod.tfvars deploy/gcp/prod.tfvars
+```
+
+A plan with no change to the config must read "No changes". If it wants to create
+resources that already exist, the link is wrong: stop before any apply.
+
 At launch there are no Cloud Run jobs and no Cloud Scheduler jobs. Best Buy has
 not issued a key, so nothing needs scheduling yet (Plan 3, "Launch without Best Buy").
 
