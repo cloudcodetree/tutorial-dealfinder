@@ -1,0 +1,10 @@
+$ python course/examples/01_raw_brands.py
+270
+'Walmart - COWIN'
+"Kohl's"
+'mountainlifestyle.ca'
+'Walmart - OEM ACCESSORIES'
+'Target'
+'Target'
+'Target'
+'costco.com'

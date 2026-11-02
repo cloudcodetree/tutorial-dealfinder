@@ -1,0 +1,32 @@
+[project]
+name = "dealfinder"
+version = "0.1.0"
+description = "Companion code for the DealFinder AI-engineering tutorial series."
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.6", "httpx>=0.27", "selectolax>=0.3,<1", "fastapi>=0.110", "uvicorn>=0.30", "python-dotenv>=1.2.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dealfinder"]
+
+[tool.setuptools.package-data]
+dealfinder = ["static/lab/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Select the rule set explicitly. Left unconfigured, ruff applies its own defaults,
+# and those grow between releases: under 0.16 that is 826 rules, where the default
+# this project was written against was a few dozen. An unpinned `ruff>=0.5` therefore
+# turned CI red without a line of code changing. Broaden this list deliberately.
+select = ["E4", "E7", "E9", "F"]

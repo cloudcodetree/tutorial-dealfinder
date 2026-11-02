@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealFinder — the lab</title>
+<!-- The server fills the API base: "/api" behind the deals Worker, "" on :8000. -->
+<meta name="api-base" content="">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/lab/lab.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">DealFinder<span>.</span></div>
+      <span class="mono" style="font-size:11px;color:var(--color-neutral-600);">the course lab · wired to live endpoints</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="rail" id="rail">
+      <div class="rail-group">
+        <h6>Model</h6>
+        <button class="rail-item active" data-mode="snapshot"><span class="bar"></span>Snapshot (Part 1)</button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="searchrow">
+        <input class="input" id="q" value="noise cancelling headphones" placeholder="Search an item…">
+        <button class="btn btn-primary" id="go" style="min-height:48px;padding-inline:20px;">Search</button>
+      </div>
+
+      <!-- SNAPSHOT (Part 1 · the data layer) -->
+      <section id="view-snapshot">
+        <div class="section-head" style="margin-bottom:var(--space-6);">
+          <h6 style="color:var(--color-accent);">Part 1 · data layer &amp; the snapshot</h6>
+          <h3>The raw brand field against the brand in the title</h3>
+          <p class="muted">The frozen snapshot, filtered by the search box — live from <span class="mono">/snapshot</span>. A highlighted row is one whose <span class="mono">brand</span> field disagrees with its title.</p>
+        </div>
+        <div class="metaline" id="snapMeta"></div>
+        <div id="snapBody"><div class="loading">Loading…</div></div>
+      </section>
+    </main>
+  </div>
+
+<script src="/lab/lab.js"></script>
+</body>
+</html>

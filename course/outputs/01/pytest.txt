@@ -1,0 +1,16 @@
+$ python -m pytest tests/test_part01.py -v -p no:cacheprovider
+======================================= test session starts ========================================
+platform <python, os>
+rootdir: .
+configfile: pyproject.toml
+plugins: <installed plugins>
+collecting ... collected 6 items
+
+tests/test_part01.py::test_snapshot_count PASSED                                             [ 16%]
+tests/test_part01.py::test_brand_field_is_retailer_polluted PASSED                           [ 33%]
+tests/test_part01.py::test_hero_query_median_is_pinned PASSED                                [ 50%]
+tests/test_part01.py::test_xm5_cross_retailer_offers_are_both_kept PASSED                    [ 66%]
+tests/test_part01.py::test_exact_duplicate_collapses_to_cheapest PASSED                      [ 83%]
+tests/test_part01.py::test_deal_pct_outliers_are_unsanitized PASSED                          [100%]
+
+======================================== 6 passed in <t>s =========================================
