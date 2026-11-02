@@ -1,14 +1,10 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import CheckPage from "./pages/CheckPage";
+import ContentPage from "./pages/ContentPage";
 import NotFound from "./pages/NotFound";
-import { useTitle } from "./lib/useTitle";
-
-// Placeholder pages until the content pages (Task 7) replace them.
-function Placeholder({ title }: { title: string }) {
-  useTitle(title);
-  return <h1>{title}</h1>;
-}
+import howWeRank from "./content/how-we-rank.md?raw";
+import privacy from "./content/privacy.md?raw";
 
 export default function App() {
   return (
@@ -17,8 +13,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<CheckPage />} />
           <Route path="/check" element={<CheckPage />} />
-          <Route path="/how-we-rank" element={<Placeholder title="How we rank" />} />
-          <Route path="/privacy" element={<Placeholder title="Privacy" />} />
+          <Route path="/how-we-rank" element={<ContentPage source={howWeRank} />} />
+          <Route path="/privacy" element={<ContentPage source={privacy} />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

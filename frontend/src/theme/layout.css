@@ -28,3 +28,6 @@ main:focus { outline: none; }
 }
 .site-footer nav { display: flex; flex-wrap: wrap; gap: var(--space-6); margin-bottom: var(--space-3); }
 .site-footer p { margin: 0; max-width: 72ch; }
+.content h2 { font-size: 20px; margin-top: var(--space-8); }
+.content p, .content li { max-width: 68ch; }
+.content ul { padding-left: var(--space-8); }
