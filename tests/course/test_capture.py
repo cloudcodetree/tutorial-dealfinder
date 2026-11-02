@@ -129,6 +129,13 @@ def test_clean_env_drops_keys(tmp_step):
     assert env["DEALFINDER_ENABLE_PAID_SOURCES"] == "0" and env["PATH"] == "/bin"
 
 
+def test_clean_env_disables_dotenv(tmp_step):
+    # dealfinder/__init__ calls load_dotenv(), which searches every parent directory:
+    # a step tree inside another checkout would read that checkout's .env and secrets.
+    env = capture.clean_env(tmp_step.manifest, {"PATH": "/bin"})
+    assert env["PYTHON_DOTENV_DISABLED"] == "1"
+
+
 def test_a_capture_sees_no_key_from_the_shell(tmp_step, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-secret")
     tmp_step.set_cmd('echo key=${OPENROUTER_API_KEY:-none}')
@@ -173,3 +180,10 @@ def test_tools_import_only_the_standard_library():
         mods |= {n.module.split(".")[0] for n in ast.walk(tree)
                  if isinstance(n, ast.ImportFrom) and n.module and n.level == 0}
         assert mods <= allowed, f"{path.name}: {sorted(mods - allowed)}"
+
+
+def test_dotenv_honours_the_disable_switch():
+    # PYTHON_DOTENV_DISABLED is only read by python-dotenv 1.2.4 and later (checked in
+    # its source); an older install would still load a parent .env.
+    pyproject = (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text()
+    assert '"python-dotenv>=1.2.4"' in pyproject

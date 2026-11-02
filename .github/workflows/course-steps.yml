@@ -16,16 +16,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+    # On pull_request the checkout is a merge commit and there is no local `course`
+    # branch, so the chain is read from the head commit that was pushed or proposed.
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python course/tools/steps.py verify
+      - run: python course/tools/steps.py verify --branch "$HEAD_SHA"
       - id: matrix
-        run: echo "matrix=$(python course/tools/steps.py matrix --json)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(python course/tools/steps.py matrix --json --branch "$HEAD_SHA")" >> "$GITHUB_OUTPUT"
 
   step:
     needs: plan

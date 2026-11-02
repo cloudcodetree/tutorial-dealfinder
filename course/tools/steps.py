@@ -334,6 +334,14 @@ def release_check(repo: Path, branch: str = "course", main: str = "main") -> lis
         _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{main}")
     except subprocess.CalledProcessError:
         return problems + [f"no branch {main!r}"]
+    # The release tags and replaces origin/main, so local main must be exactly that commit.
+    try:
+        remote = _git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{main}").strip()
+    except subprocess.CalledProcessError:
+        problems.append(f"no origin/{main}: fetch it first")
+    else:
+        if _git(repo, "rev-parse", f"refs/heads/{main}").strip() != remote:
+            problems.append(f"local {main} is not origin/{main}: fetch and fast-forward {main} first")
     if subprocess.run(["git", "-C", str(repo), "diff", "--quiet", main, branch, "--"]).returncode != 0:
         problems.append(f"{branch} tip tree differs from {main}")
     if _git(repo, "tag", "--list", RELEASE_TAG).strip():

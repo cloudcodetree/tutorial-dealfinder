@@ -60,6 +60,16 @@ def test_lab_supports_deep_links_and_a_ready_flag():
     assert re.search(r"dataset\.ready\s*=\s*['\"]true['\"]", js)
 
 
+def test_lab_sets_the_ready_flag_only_after_a_good_render():
+    # Plan 6's screenshots wait on the flag. A loader that could only draw its error
+    # screen returns false, so a failed /snapshot never becomes a lesson screenshot.
+    js = (STATIC / "lab" / "lab.js").read_text()
+    assert re.search(r"\.catch\(\(\)\s*=>\s*false\)\.then\(ok\s*=>", js)
+    assert re.search(r"ok\s*!==\s*false\s*&&", js)
+    snapshot = js[js.index("async function loadSnapshot"):js.index("/* ── STREAM")]
+    assert re.search(r"catch\(e\)\{[^\n]*return false;\s*\}", snapshot)
+
+
 def test_lab_assets_are_allowlisted():
     assert client.get("/lab/lab.css").headers["content-type"].startswith("text/css")
     assert client.get("/lab/%2e%2e%2fserve.py").status_code == 404

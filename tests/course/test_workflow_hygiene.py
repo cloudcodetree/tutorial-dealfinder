@@ -48,6 +48,15 @@ def test_no_schedule_triggers():
     assert [p.name for p in WORKFLOWS if re.search(r"^\s*schedule:", p.read_text(), re.M)] == []
 
 
+def test_course_steps_plan_reads_the_pushed_or_pr_head_commit():
+    # On pull_request the checkout is a merge commit with no local `course` branch,
+    # so the plan job names the head commit instead of the branch.
+    text = (ROOT / ".github/workflows/course-steps.yml").read_text()
+    assert "HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}" in text
+    assert 'steps.py verify --branch "$HEAD_SHA"' in text
+    assert 'steps.py matrix --json --branch "$HEAD_SHA"' in text
+
+
 def test_course_steps_workflow_reads_the_matrix():
     text = (ROOT / ".github/workflows/course-steps.yml").read_text()
     assert "fromJSON(needs.plan.outputs.matrix)" in text and "make capture-check" in text

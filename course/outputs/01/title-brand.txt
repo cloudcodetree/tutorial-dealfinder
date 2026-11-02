@@ -1,0 +1,5 @@
+$ python course/examples/01_title_brand.py
+✓ 'Sony' from: Sony WH-1000XM5 Wireless Headphones
+✓ 'Cowin' from: COWIN E7 Active Noise Cancelling Headphones
+✓ 'Bose' from: Bose QuietComfort 45 Bluetooth Wireless Over Ear Headph
+✓ 'Soundcore' from: Anker Soundcore Q20i Active Noise Cancelling Headphones

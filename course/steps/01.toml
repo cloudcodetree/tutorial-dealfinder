@@ -17,3 +17,13 @@ route = "/lab?mode=snapshot&q=sony"
 ready = "[data-mode='snapshot'][data-ready='true']"
 highlight = ["[data-row-polluted='true'] .raw-brand"]
 viewport = { width = 1280, height = 860 }
+
+# The lesson's two snippets, run as written: the code is included from these files and
+# the output from these captures, so neither can drift from the step.
+[[capture]]
+name = "raw-brands"
+cmd = "python course/examples/01_raw_brands.py"
+
+[[capture]]
+name = "title-brand"
+cmd = "python course/examples/01_title_brand.py"

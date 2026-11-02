@@ -92,17 +92,43 @@ def test_release_check_requires_equal_trees(git_repo):
     assert "course tip tree differs from main" in steps.release_check(git_repo.path)
 
 
-def test_release_check_passes_and_prints_the_commands(git_repo, capsys):
-    git_repo.step("01", lesson="a", files={"app.py": "v1"})
-    git_repo.git("branch", "main")
-    steps.retag(git_repo.path, apply=True)
-    assert steps.release_check(git_repo.path) == []
-    assert steps.main(["release-check", "--repo", str(git_repo.path)]) == 0
+def test_release_check_passes_and_prints_the_commands(git_repo_with_origin, capsys):
+    r = git_repo_with_origin
+    r.step("01", lesson="a", files={"app.py": "v1"})
+    r.git("branch", "main")
+    r.git("push", "-q", "origin", "main")
+    steps.retag(r.path, apply=True)
+    assert steps.release_check(r.path) == []
+    assert steps.main(["release-check", "--repo", str(r.path)]) == 0
     out = capsys.readouterr().out
     assert "git push --force-with-lease=main origin course:main" in out and "you do it" in out
 
 
-def test_release_check_wants_the_tags_applied_first(git_repo):
+def test_release_check_wants_main_to_match_origin(git_repo_with_origin):
+    # The release tags and replaces origin/main, so a stale local main must not pass:
+    # a product fix that only origin has would vanish from what production deploys.
+    r = git_repo_with_origin
+    r.step("01", lesson="a", files={"app.py": "v1"})
+    r.git("branch", "main")
+    r.git("switch", "-q", "main")
+    r.commit("product fix", {"app.py": "v2"})
+    r.git("push", "-q", "origin", "main")
+    r.git("reset", "-q", "--hard", "HEAD~1")
+    r.git("switch", "-q", "course")
+    steps.retag(r.path, apply=True)
+    assert "local main is not origin/main: fetch and fast-forward main first" in steps.release_check(r.path)
+
+
+def test_release_check_wants_an_origin_main(git_repo):
     git_repo.step("01", lesson="a")
     git_repo.git("branch", "main")
-    assert any("retag --apply" in p for p in steps.release_check(git_repo.path))
+    steps.retag(git_repo.path, apply=True)
+    assert "no origin/main: fetch it first" in steps.release_check(git_repo.path)
+
+
+def test_release_check_wants_the_tags_applied_first(git_repo_with_origin):
+    r = git_repo_with_origin
+    r.step("01", lesson="a")
+    r.git("branch", "main")
+    r.git("push", "-q", "origin", "main")
+    assert any("retag --apply" in p for p in steps.release_check(r.path))

@@ -24,7 +24,10 @@ from typing import Mapping
 import steps
 
 BASELINE = {"TZ": "UTC", "LC_ALL": "C.UTF-8", "PYTHONHASHSEED": "0", "COLUMNS": "100", "NO_COLOR": "1",
-            "DEALFINDER_ENABLE_PAID_SOURCES": "0"}
+            "DEALFINDER_ENABLE_PAID_SOURCES": "0",
+            # dealfinder/__init__ calls load_dotenv(), which searches every parent directory.
+            # A step tree inside another checkout must never read that checkout's .env.
+            "PYTHON_DOTENV_DISABLED": "1"}
 KEEP = ("PATH", "HOME", "VIRTUAL_ENV")
 BUILTIN_RULES = [(re.compile(r"\x1b\[[0-9;]*[A-Za-z]"), ""),
                  (re.compile(r"in \d+(\.\d+)?s\b"), "in <t>s"),

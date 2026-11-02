@@ -101,9 +101,10 @@ function setMode(m){
   if(m !== 'stream' && stream){ stream.close(); stream = null; loaded.stream = false; }
   const load = (!LIVE && NEEDS_LIVE[m]) ? (()=>liveOff(m)) :
     ({snapshot:loadSnapshot,deals:loadDeals,stream:loadStream,pipeline:loadPipeline,evals:loadEvals,models:loadModels,tracking:loadTracking,semantic:loadSemantic,ask:loadAsk,watchlist:loadWatchlist}[m] || (()=>loadGeneric(m)));
-  Promise.resolve(load()).finally(()=>{
+  // A loader returns false when all it could draw is an error, which never counts as ready.
+  Promise.resolve(load()).catch(()=>false).then(ok=>{
     const b = document.querySelector(`.rail-item[data-mode="${m}"]`);
-    if(b && state.mode === m) b.dataset.ready = 'true';
+    if(ok !== false && b && state.mode === m) b.dataset.ready = 'true';
   });
 }
 function liveOff(m){
@@ -272,7 +273,7 @@ async function loadSnapshot(){
         <td class="mono" style="padding:var(--space-2);">${money(r.price)}</td>
         <td class="mono" style="padding:var(--space-2);color:var(--color-neutral-500);">${esc(r.source||'')}</td></tr>`).join('')}
     </table></div>`;
-  }catch(e){ body.innerHTML=`<div class="loading">Could not reach /snapshot — ${esc(e.message)}</div>`; loaded.snapshot=false; }
+  }catch(e){ body.innerHTML=`<div class="loading">Could not reach /snapshot — ${esc(e.message)}</div>`; loaded.snapshot=false; return false; }
 }
 
 /* ── STREAM (Part 18 · server-sent events) ───────────────────────────── */
