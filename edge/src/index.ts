@@ -10,6 +10,8 @@
 // edge guard checks, and the visitor's CF-Connecting-IP, which its limiter keys on.
 // Deal pages and R2 wait for a Best Buy key (Plan 3, "Launch without Best Buy").
 
+import { runUptime } from './uptime';
+
 export interface Env {
   ASSETS: Fetcher;
   ASK_LIMITER?: RateLimit;
@@ -17,6 +19,8 @@ export interface Env {
   BACKEND_ORIGIN: string;
   LAUNCHED?: string;
   EDGE_SHARED_SECRET: string;
+  PUBLIC_ORIGIN?: string;
+  HEALTHCHECK_UPTIME_URL?: string;
 }
 
 export type Route = 'api' | 'lab' | 'assets';
@@ -140,6 +144,11 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
 }
 
 export default {
+  // Every 10 minutes (wrangler.jsonc triggers): probe the site and ping Healthchecks.io.
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runUptime(env, new Date(event.scheduledTime)));
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
     const route = routeOf(pathname);
