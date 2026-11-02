@@ -49,15 +49,16 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 
 ## The launch gate (must be TRUE before any public launch)
 
-- [ ] Cost-per-query measured and bounded (no LLM on the default path; caching in front).
-- [ ] Abuse/bot rate-limiting on anonymous endpoints.
-- [ ] Async/horizontal: no single-worker blocking; heavy work off the request path.
-- [ ] Observability: per-request latency + cost + error tracking, alerting.
-- [ ] Privacy: GDPR/CCPA data-subject flows + cookie consent; secrets in a manager, not `.env`.
-- [ ] Affiliate compliance (disclosure) if monetized.
-- [ ] Every deployed component's ongoing cost is documented in COST.md with a teardown step;
-      `scripts/cost_check.py` (extended for cloud) reports the live billable footprint.
+A box is checked only when every proof it names passes on `main`. Plan 8 checks them,
+after the live proofs pass. Live commands name the launch host. Before launch, run them
+against `https://deals.beta.cloudcodetree.com`.
 
+- [ ] Cost-per-query measured and bounded (no LLM on the default path; caching in front). Proof: tests/test_observability.py::test_llm_usage_comes_from_the_response, tests/test_observability.py::test_missing_usage_is_null_not_guessed, tests/test_serve.py::test_anonymous_search_is_edge_cacheable_and_signed_in_is_private, tests/test_serve.py::test_ask_answers_are_cached_with_ttl, tests/test_serve.py::test_ask_daily_cap_falls_back_to_the_deterministic_path, tests/test_llm.py::test_openrouter_refused_in_production
+- [ ] Abuse/bot rate-limiting on anonymous endpoints. Proof: tests/test_ratelimit.py::test_llm_routes_are_limited_hardest, tests/test_ratelimit.py::test_client_ip_header_is_trusted_only_behind_the_edge_secret, tests/test_ratelimit.py::test_a_flood_of_new_clients_cannot_evict_a_limited_one, tests/test_serve.py::test_ask_has_the_strictest_limit; live: the 31st `/api/search` in 10 s answers 429
+- [ ] Heavy work in scheduled jobs, capped horizontal scaling, no queue at launch. There are no jobs at launch: they wait for a Best Buy key. Proof: tests/test_gcp_config.py::test_scales_to_zero_and_is_capped, tests/test_gcp_config.py::test_no_scheduled_jobs_at_launch; live: `gcloud run services describe dealfinder-api --region us-central1 --format='value(spec.template.metadata.annotations)'` shows maxScale 2
+- [ ] Observability: per-request latency + cost + error tracking, alerting. Proof: tests/test_observability.py::test_request_log_carries_latency_and_cost, tests/test_observability.py::test_request_log_has_no_query_text, tests/test_observability.py::test_sentry_scrubs_query_string, tests/test_observability.py::test_call_rate_warning_fires_once, tests/test_healthchecks_setup.py::test_setup_creates_the_uptime_check_idempotently (and edge/src/uptime.test.ts); live: the Plan 5 Task 14 drills
+- [ ] Privacy: data-subject export and delete over the real tables; cookie consent required only if a non-essential cookie is ever added, none at launch; secrets in a manager, not `.env`. Proof: tests/test_account.py::test_delete_account_removes_only_own_rows, tests/test_account.py::test_export_returns_every_table, tests/test_account.py::test_no_backend_route_sets_cookies, tests/test_settings.py::test_production_never_reads_dotenv, tests/test_runbook.py::test_cloud_run_request_logs_are_excluded; live: `python scripts/cookie_audit.py https://deals.cloudcodetree.com`
+- [ ] Every deployed component's ongoing cost is documented in COST.md with a teardown step; `scripts/cost_check.py` (extended for cloud) reports the live billable footprint. Proof: tests/test_cost_check.py::test_live_report_passes_a_healthy_footprint, tests/test_cost_check.py::test_live_report_flags_a_missing_budget_and_a_big_registry, tests/test_runbook.py::test_cost_rows_cover_the_new_free_services; live: `python scripts/cost_check.py --live --project dealfinder-prod-cct`
 ---
 
 ## Phases (sequenced by dependency + value)
@@ -78,9 +79,13 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 - [x] **Watchlist** — add/list/remove (`/watchlist`), `hit` flag when last price ≤ target;
       per-user private (RLS), account-gated (`require_account`), dev `X-User-Id` sign-in.
 - [x] Watchlist **UI** in the Nocturne surface (＋watch on deals, watchlist view, count badge).
-- [ ] Real consumer auth (Supabase OAuth in the browser) — replace the dev `X-User-Id`.
-- [ ] Saved searches (parallel to watchlist).
+- [x] Real consumer auth (Supabase OAuth in the browser) — replace the dev `X-User-Id`.
+      Proof: tests/test_auth.py::test_valid_token_returns_user, tests/test_auth.py::test_hs256_token_is_rejected,
+      tests/test_auth.py::test_jwks_unreachable_fails_closed.
+- [x] Saved searches (parallel to watchlist). Proof: tests/test_userstore.py::test_saved_searches_private_per_user,
+      tests/test_serve.py::test_saved_search_cap_is_409.
 - [ ] Price-drop **alert delivery** (needs the P2 job queue: re-price watchlist → email/push).
+      Deferred: waits for a Best Buy key (2026-10-27).
 
 ### P2 — Scale & cost-per-query
 **Goal:** survive being popular without going broke.
@@ -93,6 +98,8 @@ access (not login-gated)**, and cheap-per-query AI at public scale.
 **DoD:** measured cost-per-query + p95 latency with cache hit/miss; load test; alerts run async.
 
 ### P3 — Monetization: affiliate click-through
+Deferred: revenue skipped (owner decision, 2026-10-25).
+
 **Goal:** make it a business the B2C way.
 - Wrap outbound "open offer" links with **affiliate tags** (Amazon Associates, eBay Partner
   Network, etc.); **click + conversion tracking**; revenue attribution.
